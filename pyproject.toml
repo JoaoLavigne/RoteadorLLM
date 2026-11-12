@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roteador"
+version = "0.1.0"
+description = "Roteador de requisições entre modelos de LLM (custo × qualidade)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "numpy",
+    "scikit-learn",
+    "joblib",
+    "tiktoken",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+roteador = "roteador.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

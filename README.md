@@ -9,10 +9,10 @@ O objetivo é mostrar, com números, quanto custo é economizado mantendo a maio
 1. O **tokenizador** conta os tokens da pergunta (e do contexto, quando houver).
 2. O **roteador** devolve uma `Decisao`: papel (barato ou forte), motivo, faixa prevista e limite de tokens.
 3. Se houver limite `X`, o prompt recebe o aviso "Limite seus gastos a cerca de X tokens." e um teto rígido é aplicado.
-4. O **adapter** do papel escolhido gera a resposta.
+4. O **adapter** do papel escolhido gera a resposta, com retry para falhas transitórias e fallback para o outro papel se o principal não responder.
 5. O **detector** classifica a resposta como completa, vazia ou truncada.
 6. Respostas vazias ou truncadas recebem **uma única nova tentativa**: o forte repete com o teto dobrado; o barato escala para o forte.
-7. O custo estimado é calculado e a requisição é gravada no registro. Ocorrências também vão para o arquivo de ML.
+7. O custo estimado é calculado e a requisição é gravada no armazenamento configurado (hoje CSV). Ocorrências também vão para o arquivo de ML.
 8. O orquestrador devolve um `Resultado`.
 
 ### Roteador v1 e v2
@@ -33,7 +33,8 @@ O objetivo é mostrar, com números, quanto custo é economizado mantendo a maio
 │   ├── tokenizador.py        contagem aproximada de tokens
 │   ├── adapters/             base.py, falso.py, ollama.py, gemini.py
 │   ├── detector.py           classifica respostas vazias ou truncadas
-│   ├── registro.py           CSV de requisições e arquivo de ML
+│   ├── comunicacao.py        retry e fallback das chamadas aos adapters
+│   ├── registro.py           interface Registro + adapters CSV e memória
 │   ├── limite.py             prompt de limite e teto rígido
 │   ├── roteador_v1.py
 │   ├── orquestrador.py       junta tudo e trata a nova tentativa
@@ -47,7 +48,7 @@ O objetivo é mostrar, com números, quanto custo é economizado mantendo a maio
 └── README.md
 ```
 
-**Regra de dependência:** `tipos` e `config` → (`tokenizador`, `adapters`, `detector`, `registro`, `limite`, `dados`) → (`roteador_v1`, `ml`) → `orquestrador` → `avaliacao` → `cli`. Nenhum módulo importa de um nível à direita e não há dependência circular. O orquestrador depende da interface `Roteador`, não de uma versão específica.
+**Regra de dependência:** `tipos` e `config` → (`tokenizador`, `adapters`, `detector`, `registro`, `limite`, `dados`) → (`roteador_v1`, `ml`, `comunicacao`) → `orquestrador` → `avaliacao` → `cli`. Nenhum módulo importa de um nível à direita e não há dependência circular. O orquestrador depende das interfaces `Roteador` e `Registro`, não de versões ou formatos específicos.
 
 ## Requisitos e instalação
 
@@ -61,7 +62,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Dependências de execução: `requests`, `numpy`, `scikit-learn`, `joblib`. Apenas para desenvolvimento: `pytest`.
+Dependências de execução: `requests`, `numpy`, `scikit-learn`, `joblib` e `tiktoken`. Apenas para desenvolvimento: `pytest`.
 
 ## Configuração
 
@@ -80,9 +81,14 @@ Chaves desconhecidas no JSON geram erro com mensagem clara. Os principais campos
 | `modelo_barato` | `llama3.2:3b` | Modelo local via Ollama |
 | `janela_contexto_barato` | `8192` | Contexto máximo aceito pelo barato |
 | `limiar_tokens_pergunta` | `200` | Limiar do roteador v1 (a calibrar) |
+| `tokenizador` | `tiktoken:o200k_base` | Tokenizador real; formato `tiktoken:<codificação>` |
+| `divisor_aproximado` | `4` | Caracteres por token na reserva aproximada |
 | `x_tokens_forte_limitado` | `None` | Limite `X` para o forte; `None` desativa |
 | `fator_teto` | `1.5` | Teto rígido = `ceil(fator_teto × X)` |
 | `fator_nova_tentativa` | `2.0` | Multiplicador do teto na nova tentativa |
+| `tentativas_comunicacao` | `3` | Tentativas por adapter antes de desistir/fallback |
+| `espera_entre_tentativas_s` | `0.5` | Espera entre tentativas transitórias |
+| `fallback_comunicacao` | `True` | Tenta o outro papel se o principal esgotar |
 | `limiar_raciocinio` | `0.9` | Fração do teto consumida por raciocínio |
 | `limiar_alerta` | `0.05` | Taxa de alerta no relatório |
 | `percentis_faixas` | `(1/3, 2/3)` | Cortes das faixas de tamanho |
@@ -99,6 +105,14 @@ Chaves desconhecidas no JSON geram erro com mensagem clara. Os principais campos
 | `OLLAMA_HOST` | Endereço do Ollama (padrão `http://localhost:11434`) |
 
 > Os preços em `preco_ref` são apenas **referências** para estimar custo (tabela da API Claude, outubro de 2026). Os modelos realmente usados neste projeto são gratuitos.
+
+### Retry e fallback de comunicação
+
+Cada adapter tenta até `tentativas_comunicacao` vezes. Só erros transitórios são repetidos: falha de rede, HTTP 408/425/429/5xx e JSON inválido. Erros HTTP 4xx permanentes (400, 401, 403, 404 etc.) não são repetidos.
+
+Se o adapter do papel escolhido esgotar as tentativas e `fallback_comunicacao` estiver ligado, o orquestrador tenta o outro papel (barato ↔ forte), também com retry. O fallback usa o prompt base e **não aplica limite**: o X só vale para o forte na chamada principal. Se os dois falharem, o `ErroAdapter` sobe com as duas mensagens.
+
+O campo `tentativas` do `registro.csv` conta todas as chamadas reais, incluindo retries e fallback. O `papel` continua sendo o papel da decisão inicial; o `modelo` é o modelo que respondeu de fato. O custo usa o papel que realmente respondeu.
 
 ## Uso
 
@@ -157,7 +171,7 @@ id,documento,tipo,pergunta,contexto_tokens,nota_barato,nota_forte,tokens_respost
 Uma linha por requisição:
 
 ```
-id_requisicao,timestamp,papel,modelo,tokens_pergunta,tokens_entrada,tokens_saida,tokens_raciocinio,tempo_ms,custo_estimado_usd,motivo_decisao,faixa_prevista,limite_tokens,motivo_parada,ocorrencia,tentativas
+id_requisicao,timestamp,papel,modelo,tokens_pergunta,tokenizador_usado,tokens_entrada,tokens_saida,tokens_raciocinio,tempo_ms,custo_estimado_usd,motivo_decisao,faixa_prevista,limite_tokens,motivo_parada,ocorrencia,tentativas
 ```
 
 ### `resultados/ml_ocorrencias.csv`
@@ -169,6 +183,31 @@ id_requisicao,timestamp,modelo,faixa_prevista,limite_aplicado,tokens_saida_reais
 ```
 
 Ações: `nenhuma`, `nova_tentativa_teto_maior`, `escalou_ao_forte`. Resultado final: `ok` ou `ainda_com_ocorrencia`.
+
+## Armazenamento (CSV hoje, banco depois)
+
+O orquestrador não conhece CSV. Ele recebe dois objetos que implementam a interface `Registro`, com os métodos `adicionar(linha)` e `ler()`. Hoje os adapters usados são `RegistroCsv` (para `registro.csv` e `ml_ocorrencias.csv`) e `RegistroMemoria` (para testes, sem I/O).
+
+Se um dia quiser trocar por SQLite, Postgres ou outra coisa, crie um adapter que implemente `Registro` e passe no lugar no ponto de montagem (a futura CLI). O roteador, o detector, o limite e o orquestrador continuam iguais. O adapter novo só precisa respeitar as colunas de `COLUNAS_REGISTRO` e `COLUNAS_ML`.
+
+```python
+from roteador.registro import COLUNAS_REGISTRO, RegistroCsv
+
+registro = RegistroCsv("resultados/registro.csv", COLUNAS_REGISTRO)
+```
+
+Para um banco, a ideia é a mesma:
+
+```python
+from roteador.registro import Registro
+
+
+class RegistroSql(Registro):
+    def adicionar(self, linha): ...
+    def ler(self): ...
+```
+
+Aí é só montar o `Orquestrador` com `RegistroSql(...)` em vez de `RegistroCsv(...)`.
 
 ## Curva de custo × qualidade
 
@@ -194,7 +233,7 @@ O relatório de alertas calcula a taxa de respostas vazias e truncadas por model
 pytest
 ```
 
-Nenhum teste usa rede, Ollama ou Gemini: os adapters falsos e as funções HTTP injetadas cobrem todo o fluxo.
+Nenhum teste usa rede, Ollama ou Gemini: os adapters falsos e as funções HTTP injetadas cobrem todo o fluxo. A suíte também cobre retry/fallback de comunicação, erros transitórios e permanentes, campos vazios/nulos, caracteres especiais e integridade das colunas nos adapters de registro.
 
 ## Limitações
 
