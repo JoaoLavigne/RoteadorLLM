@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Ferramentas
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs e temporários
+*.log
+tmp/
+
+# Modelos treinados
+*.joblib
+modelos/
+
+# Resultados gerados
+resultados/*.csv
+
+# Bancos locais
+*.db
+*.sqlite
+
+# Segredos e configuração local
+.env
+.env.*
+config.json
+
+# Documentos locais
+Guia de implementação do roteador de LLMs.md
+Roteador de requisições para LLMs (custo × qualidade).md
+testesMentoria.md
