@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 class Papel(str, Enum):
@@ -77,5 +77,6 @@ class Adapter(Protocol):
     def gerar(self, prompt: str, limite_tokens: int | None) -> RespostaModelo: ...
 
 
+@runtime_checkable
 class Roteador(Protocol):
     def decidir(self, pergunta: str, contexto: str = "") -> Decisao: ...

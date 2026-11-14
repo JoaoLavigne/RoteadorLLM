@@ -32,6 +32,7 @@ class Config:
     caminho_registro: str = "resultados/registro.csv"
     caminho_ml: str = "resultados/ml_ocorrencias.csv"
     caminho_dataset: str = "dados/dataset.csv"
+    caminho_modelo_v2: str = "resultados/modelo_v2.joblib"
 
 
 def carregar_config(caminho: str | Path | None = None) -> Config:

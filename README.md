@@ -1,231 +1,212 @@
 # Roteador de LLMs (custo × qualidade)
 
-Roteador que decide, para cada pergunta, se responde com o modelo **barato** (local, `llama3.2:3b` via Ollama) ou com o modelo **forte** (Gemini Flash). Cada chamada é registrada e o sistema é avaliado por uma curva de custo × qualidade.
+> Um roteador que escolhe, para cada pergunta, o modelo mais barato que ainda entrega a qualidade necessária.
 
-O objetivo é mostrar, com números, quanto custo é economizado mantendo a maior parte da qualidade do modelo forte.
+O projeto compara um modelo **barato** (`llama3.2:3b`, local via Ollama) com um modelo **forte**. Cada requisição é decidida, registrada e avaliada em uma curva de custo × qualidade.
+
+O resultado principal é uma frase simples:
+
+> “Mantive **X%** da qualidade do modelo forte gastando **Y%** menos.”
+
+## Por que este projeto existe
+
+Produtos com LLM pagam por token. Modelos fortes custam muito mais que modelos pequenos. Ao mesmo tempo, a maior parte das perguntas é simples. Enviar tudo ao modelo forte desperdiça dinheiro. Enviar tudo ao modelo pequeno derruba a qualidade nas perguntas difíceis.
+
+Este projeto testa uma alternativa: **decidir por requisição**. O roteador escolhe o modelo, aplica limites quando faz sentido, registra a decisão e mede o custo e a qualidade.
+
+## O que está pronto
+
+- **Roteador v1:** decide por contagem de tokens e pela janela de contexto.
+- **Roteador v2:** usa dois classificadores de ML sobre o embedding da pergunta.
+- **Limite de tokens:** o modelo forte pode receber um teto para respostas de tamanho médio.
+- **Retry e fallback:** falhas transitórias são repetidas; se necessário, o outro modelo é tentado.
+- **Detector de respostas vazias ou truncadas:** classifica a resposta e faz no máximo uma nova tentativa.
+- **Registro:** grava modelo, tokens, tempo, custo estimado e decisão.
+- **Dataset:** lê CSV ou SQLite e separa treino e teste por documento.
+- **Avaliação:** gera a curva de custo × qualidade e o relatório de alertas.
+- **Testes:** a suíte cobre o fluxo sem rede, Ollama ou Gemini.
 
 ## Como funciona
 
-1. O **tokenizador** conta os tokens da pergunta (e do contexto, quando houver).
-2. O **roteador** devolve uma `Decisao`: papel (barato ou forte), motivo, faixa prevista e limite de tokens.
-3. Se houver limite `X`, o prompt recebe o aviso "Limite seus gastos a cerca de X tokens." e um teto rígido é aplicado.
-4. O **adapter** do papel escolhido gera a resposta, com retry para falhas transitórias e fallback para o outro papel se o principal não responder.
-5. O **detector** classifica a resposta como completa, vazia ou truncada.
-6. Respostas vazias ou truncadas recebem **uma única nova tentativa**: o forte repete com o teto dobrado; o barato escala para o forte.
-7. O custo estimado é calculado e a requisição é gravada no armazenamento configurado (hoje CSV). Ocorrências também vão para o arquivo de ML.
-8. O orquestrador devolve um `Resultado`.
-
-### Roteador v1 e v2
-
-- **v1 (determinístico):** decide apenas pela contagem de tokens da pergunta e por uma regra de janela de contexto, sem lista de palavras-chave.
-- **v2 (ML):** dois classificadores sobre o embedding da pergunta e a contagem de tokens:
-  - **A (qualidade):** "o modelo barato basta?" — decide o roteamento;
-  - **B (tamanho):** prevê a faixa da resposta (curta, média ou longa) e define o limite de tokens no forte.
-
-## Arquitetura
-
-```
-.
-├── pyproject.toml
-├── src/roteador/
-│   ├── tipos.py              dataclasses, enums e interfaces (Protocol)
-│   ├── config.py             todos os valores ajustáveis
-│   ├── tokenizador.py        contagem aproximada de tokens
-│   ├── adapters/             base.py, falso.py, ollama.py, gemini.py
-│   ├── detector.py           classifica respostas vazias ou truncadas
-│   ├── comunicacao.py        retry e fallback das chamadas aos adapters
-│   ├── registro.py           interface Registro + adapters CSV e memória
-│   ├── limite.py             prompt de limite e teto rígido
-│   ├── roteador_v1.py
-│   ├── orquestrador.py       junta tudo e trata a nova tentativa
-│   ├── dados/                carregador.py, rotulos.py, routerbench.py
-│   ├── avaliacao/            politicas.py, curva.py, relatorio.py
-│   ├── ml/                   embedder.py, classificadores.py, roteador_v2.py
-│   └── cli.py
-├── dados/                    dataset.csv e arquivos de entrada
-├── resultados/               registro.csv, ml_ocorrencias.csv, curva.csv
-├── tests/                    espelha src/, um teste por módulo
-└── README.md
+```text
+pergunta + contexto
+        │
+        ▼
+   tokenizador
+        │
+        ▼
+  roteador v1 ou v2
+        │
+        ├──────────────► modelo barato (Ollama)
+        │
+        └──────────────► modelo forte 
+        │
+        ▼
+  orquestrador + adapter
+        │
+        ▼
+  detector de falhas
+        │
+        ▼
+  resposta + registro + arquivo de ML
 ```
 
-**Regra de dependência:** `tipos` e `config` → (`tokenizador`, `adapters`, `detector`, `registro`, `limite`, `dados`) → (`roteador_v1`, `ml`, `comunicacao`) → `orquestrador` → `avaliacao` → `cli`. Nenhum módulo importa de um nível à direita e não há dependência circular. O orquestrador depende das interfaces `Roteador` e `Registro`, não de versões ou formatos específicos.
+1. O tokenizador conta os tokens da pergunta e do contexto.
+2. O roteador devolve uma `Decisao`: papel, motivo, faixa prevista e limite de tokens.
+3. O orquestrador chama o adapter do modelo escolhido.
+4. O detector classifica a resposta como completa, vazia ou truncada.
+5. Respostas vazias ou truncadas recebem uma única nova tentativa.
+6. O custo é estimado e a requisição é registrada.
+7. A avaliação compara políticas sobre o dataset já gravado.
 
-## Requisitos e instalação
+### v1 e v2
+
+| Versão | Como decide | Quando usar |
+| --- | --- | --- |
+| **v1** | Contagem de tokens da pergunta e janela de contexto | Primeiro uso, sem modelo treinado |
+| **v2** | Classificador A (“o barato basta?”) + classificador B (faixa da resposta) | Depois de treinar com dados rotulados |
+
+O v2 usa o embedding da pergunta e o `log1p` da contagem de tokens. O modelo B prevê a faixa `curta`, `media` ou `longa`. No forte com faixa média, o roteador aplica um limite de tokens.
+
+## Requisitos
 
 - Python 3.11 ou superior
-- Ollama em execução local (para o modelo barato e os embeddings)
-- Chave da API do Gemini
+- [Ollama](https://ollama.com/) em execução local
+- Chave da API da LLM
+
+O Ollama é usado pelo modelo barato e pelos embeddings do v2. 
+
+## Instalação
 
 ```bash
+git clone <url-do-repositorio>
+cd RoteadorLLM
+
 python -m venv .venv
 source .venv/bin/activate
+
 pip install -e ".[dev]"
 ```
 
-Dependências de execução: `requests`, `numpy`, `scikit-learn`, `joblib` e `tiktoken`. Apenas para desenvolvimento: `pytest`.
+Baixe os modelos locais:
 
-## Configuração
-
-Os valores ajustáveis ficam em `src/roteador/config.py`. Um JSON opcional pode sobrescrever os padrões:
-
-```python
-from roteador.config import carregar_config
-
-cfg = carregar_config("config.json")
+```bash
+ollama pull llama3.2:3b
+ollama pull nomic-embed-text
 ```
 
-Chaves desconhecidas no JSON geram erro com mensagem clara. Os principais campos:
+Configure a chave da API de sua LLM de uso
 
-| Campo | Padrão | Descrição |
-| --- | --- | --- |
-| `modelo_barato` | `llama3.2:3b` | Modelo local via Ollama |
-| `janela_contexto_barato` | `8192` | Contexto máximo aceito pelo barato |
-| `limiar_tokens_pergunta` | `200` | Limiar do roteador v1 (a calibrar) |
-| `tokenizador` | `tiktoken:o200k_base` | Tokenizador real; formato `tiktoken:<codificação>` |
-| `divisor_aproximado` | `4` | Caracteres por token na reserva aproximada |
-| `x_tokens_forte_limitado` | `None` | Limite `X` para o forte; `None` desativa |
-| `fator_teto` | `1.5` | Teto rígido = `ceil(fator_teto × X)` |
-| `fator_nova_tentativa` | `2.0` | Multiplicador do teto na nova tentativa |
-| `tentativas_comunicacao` | `3` | Tentativas por adapter antes de desistir/fallback |
-| `espera_entre_tentativas_s` | `0.5` | Espera entre tentativas transitórias |
-| `fallback_comunicacao` | `True` | Tenta o outro papel se o principal esgotar |
-| `limiar_raciocinio` | `0.9` | Fração do teto consumida por raciocínio |
-| `limiar_alerta` | `0.05` | Taxa de alerta no relatório |
-| `percentis_faixas` | `(1/3, 2/3)` | Cortes das faixas de tamanho |
-| `limiar_probabilidade` | `0.5` | Limiar do classificador A (v2) |
-| `embedder_modelo` | `nomic-embed-text` | Modelo de embedding via Ollama |
-| `preco_ref` | barato `(0.10, 0.50)`; forte `(2.00, 10.00)` | USD por milhão de tokens (entrada, saída) |
-
-### Variáveis de ambiente
+Variáveis disponíveis:
 
 | Variável | Uso |
 | --- | --- |
-| `GEMINI_API_KEY` | Chave da API do Gemini (obrigatória para o adapter Gemini) |
-| `GEMINI_MODEL` | Id do modelo Gemini usado como forte |
 | `OLLAMA_HOST` | Endereço do Ollama (padrão `http://localhost:11434`) |
 
-> Os preços em `preco_ref` são apenas **referências** para estimar custo (tabela da API Claude, outubro de 2026). Os modelos realmente usados neste projeto são gratuitos.
+## Configuração
 
-### Retry e fallback de comunicação
+Os valores padrão ficam em `src/roteador/config.py`. Você pode sobrescrever os valores com um arquivo JSON:
 
-Cada adapter tenta até `tentativas_comunicacao` vezes. Só erros transitórios são repetidos: falha de rede, HTTP 408/425/429/5xx e JSON inválido. Erros HTTP 4xx permanentes (400, 401, 403, 404 etc.) não são repetidos.
-
-Se o adapter do papel escolhido esgotar as tentativas e `fallback_comunicacao` estiver ligado, o orquestrador tenta o outro papel (barato ↔ forte), também com retry. O fallback usa o prompt base e **não aplica limite**: o X só vale para o forte na chamada principal. Se os dois falharem, o `ErroAdapter` sobe com as duas mensagens.
-
-O campo `tentativas` do `registro.csv` conta todas as chamadas reais, incluindo retries e fallback. O `papel` continua sendo o papel da decisão inicial; o `modelo` é o modelo que respondeu de fato. O custo usa o papel que realmente respondeu.
-
-## Uso
-
-> A interface abaixo corresponde ao plano de implementação (camadas 0 a 15). Subcomandos e opções são ativados conforme cada camada fica pronta.
-
-### Rotear uma pergunta
-
-```bash
-roteador rotear "Explique a diferença entre treino e teste" --contexto documentos/guia.md
+```json
+{
+  "modelo_barato": "llama3.2:3b",
+  "tokenizador": "tiktoken:o200k_base",
+  "limiar_tokens_pergunta": 200,
+  "limiar_probabilidade": 0.5
+}
 ```
 
-Mostra a decisão do roteador, a resposta e o custo estimado. O `--contexto` é opcional.
-
-### Coletar respostas sobre o dataset
+Use o arquivo em qualquer subcomando:
 
 ```bash
+roteador rotear "Explique treino e teste" --config config.json
+```
+
+Chaves desconhecidas geram erro com mensagem clara. O arquivo `config.json` é local e não entra no Git.
+
+## Início rápido
+
+Com o Ollama e o Gemini configurados:
+
+```bash
+# 1. Roteie uma pergunta
+roteador rotear "Explique a diferença entre treino e teste"
+
+# 2. Colete respostas sobre o dataset
 roteador coletar --politica v1
-```
 
-Políticas disponíveis: `barato`, `forte`, `forte_limitado`, `v1` (e `v2` após a camada 13). O comando roda o orquestrador sobre as perguntas do dataset e grava respostas, tokens e tempo, deixando as notas em branco para preenchimento manual.
-
-### Avaliar e gerar a curva
-
-```bash
+# 3. Gere a curva de custo × qualidade
 roteador avaliar
 ```
 
-Gera `resultados/curva.csv` e o relatório de alertas, sem chamar modelos.
+O subcomando `rotear` usa o **v1**. Para usar o v2, treine o modelo e use `coletar --politica v2` ou `avaliar` com o modelo disponível.
 
-### Treinar o roteador v2 (opcional)
+### Treinar o v2
 
 ```bash
 roteador treinar
 ```
 
-Treina os classificadores A e B e salva o modelo com `joblib`.
+O comando divide o dataset por documento, treina os classificadores A e B, mostra a acurácia no conjunto de teste e salva o modelo em `resultados/modelo_v2.joblib`.
 
-## Dados
+## Comandos
 
-O `dataset.csv` segue o esquema:
+| Comando | O que faz |
+| --- | --- |
+| `roteador rotear "pergunta"` | Responde uma pergunta com o roteador v1. Aceita `--contexto arquivo`. |
+| `roteador coletar --politica v1` | Roda uma política sobre o dataset e grava respostas para anotação. |
+| `roteador avaliar` | Gera `curva.csv` e o relatório de alertas sem chamar os modelos de resposta. |
+| `roteador treinar` | Treina e salva o modelo v2. |
 
-```
+Políticas de coleta: `barato`, `forte`, `forte_limitado`, `v1` e `v2`.
+
+Todos os comandos aceitam `--config arquivo.json`.
+
+## Dataset
+
+O arquivo padrão é `dados/dataset.csv`:
+
+```text
 id,documento,tipo,pergunta,contexto_tokens,nota_barato,nota_forte,tokens_resposta_barato,tokens_resposta_forte,truncada_forte,nota_forte_limitado,tokens_resposta_forte_limitado
 ```
 
+Regras principais:
+
 - Notas: `correta` (2), `parcial` (1) ou `errada` (0).
-- `contexto_tokens`, `truncada_forte` e as duas últimas colunas são opcionais.
-- **Barato basta** quando a nota do barato é maior ou igual à do forte.
-- A divisão treino/teste é feita **por documento**, para o mesmo texto não aparecer nos dois lados.
-- Resposta truncada sobe uma faixa de tamanho, pois o tamanho real é maior ou igual ao teto.
+- “O barato basta” quando `nota_barato >= nota_forte`.
+- A separação treino/teste é feita **por documento**.
+- Resposta truncada sobe uma faixa de tamanho.
+- O mesmo esquema pode ficar em SQLite (`.db`, `.sqlite` ou `.sqlite3`).
 
-## Registros
+## Arquitetura
 
-### `resultados/registro.csv`
-
-Uma linha por requisição:
-
-```
-id_requisicao,timestamp,papel,modelo,tokens_pergunta,tokenizador_usado,tokens_entrada,tokens_saida,tokens_raciocinio,tempo_ms,custo_estimado_usd,motivo_decisao,faixa_prevista,limite_tokens,motivo_parada,ocorrencia,tentativas
-```
-
-### `resultados/ml_ocorrencias.csv`
-
-Uma linha por ocorrência de resposta vazia ou truncada:
-
-```
-id_requisicao,timestamp,modelo,faixa_prevista,limite_aplicado,tokens_saida_reais,tokens_raciocinio,motivo_parada,tipo_ocorrencia,acao,resultado_final
-```
-
-Ações: `nenhuma`, `nova_tentativa_teto_maior`, `escalou_ao_forte`. Resultado final: `ok` ou `ainda_com_ocorrencia`.
-
-## Armazenamento (CSV hoje, banco depois)
-
-O orquestrador não conhece CSV. Ele recebe dois objetos que implementam a interface `Registro`, com os métodos `adicionar(linha)` e `ler()`. Hoje os adapters usados são `RegistroCsv` (para `registro.csv` e `ml_ocorrencias.csv`) e `RegistroMemoria` (para testes, sem I/O).
-
-Se um dia quiser trocar por SQLite, Postgres ou outra coisa, crie um adapter que implemente `Registro` e passe no lugar no ponto de montagem (a futura CLI). O roteador, o detector, o limite e o orquestrador continuam iguais. O adapter novo só precisa respeitar as colunas de `COLUNAS_REGISTRO` e `COLUNAS_ML`.
-
-```python
-from roteador.registro import COLUNAS_REGISTRO, RegistroCsv
-
-registro = RegistroCsv("resultados/registro.csv", COLUNAS_REGISTRO)
+```text
+.
+├── pyproject.toml
+├── README.md
+├── SPEC.md
+├── Roteador de requisições para LLMs (custo × qualidade).md
+├── src/roteador/
+│   ├── tipos.py              tipos, enums e interfaces
+│   ├── config.py             valores ajustáveis
+│   ├── tokenizador.py        contagem de tokens
+│   ├── adapters/             base, falso, Ollama e Gemini
+│   ├── detector.py           respostas vazias ou truncadas
+│   ├── comunicacao.py        retry e fallback
+│   ├── registro.py           CSV e memória
+│   ├── limite.py             limite e teto de tokens
+│   ├── roteador_v1.py        decisão por tokens
+│   ├── orquestrador.py       fluxo completo
+│   ├── dados/                carregador e rótulos (RouterBench futuro)
+│   ├── avaliacao/            políticas, curva e relatório
+│   ├── ml/                   embedder, classificadores e roteador_v2
+│   └── cli.py
+├── dados/                    dataset e entradas
+├── resultados/               arquivos gerados
+└── tests/                    testes sem rede
 ```
 
-Para um banco, a ideia é a mesma:
-
-```python
-from roteador.registro import Registro
-
-
-class RegistroSql(Registro):
-    def adicionar(self, linha): ...
-    def ler(self): ...
-```
-
-Aí é só montar o `Orquestrador` com `RegistroSql(...)` em vez de `RegistroCsv(...)`.
-
-## Curva de custo × qualidade
-
-A avaliação compara estas políticas sobre o dataset já gravado (sem chamar modelos):
-
-- `sempre_barato`
-- `sempre_forte`
-- `aleatorio(proporcao, semente)`
-- `perfeito` (usa os rótulos reais; mostra o teto possível)
-- `v1`
-- `forte_limitado`
-- `v2` (após a camada 13)
-
-Para cada política são calculados a qualidade média (nota ÷ 2), o custo estimado e os percentuais em relação ao `sempre_forte`. O resultado principal é a frase:
-
-> "Mantive **X%** da qualidade do modelo forte gastando **Y%** menos."
-
-O relatório de alertas calcula a taxa de respostas vazias e truncadas por modelo e por faixa, comparando as ocorrências do arquivo de ML com as requisições do registro, e marca as que ultrapassam `limiar_alerta`.
+O orquestrador depende das interfaces `Roteador`, `Adapter` e `Registro`. Ele não depende de uma versão específica do roteador nem do formato CSV.
 
 ## Testes
 
@@ -233,14 +214,57 @@ O relatório de alertas calcula a taxa de respostas vazias e truncadas por model
 pytest
 ```
 
-Nenhum teste usa rede, Ollama ou Gemini: os adapters falsos e as funções HTTP injetadas cobrem todo o fluxo. A suíte também cobre retry/fallback de comunicação, erros transitórios e permanentes, campos vazios/nulos, caracteres especiais e integridade das colunas nos adapters de registro.
+Os testes não usam rede, Ollama ou Gemini. Eles usam adapters falsos, `tmp_path` e funções HTTP injetadas.
+
+### Teste de economia
+
+```bash
+pytest tests/avaliacao/test_politicas.py::test_avalia_politicas_com_resultado_calculado_a_mao -v
+```
+
+Resultado: `1 passed in 0.03s`.
+
+O teste usa um dataset sintético de 4 linhas, um `TokenizadorFixo(10)` e preços de referência fixos na configuração. Ele verifica os valores calculados à mão:
+
+| Política | Qualidade média | Custo estimado | Qualidade vs. forte | Economia |
+| --- | ---: | ---: | ---: | ---: |
+| `sempre_barato` | 62,5% | 140 | 83,3% | 95,0% |
+| `sempre_forte` | 75,0% | 2800 | 100,0% | 0,0% |
+| `perfeito` | 87,5% | 950 | 116,7% | 66,07% |
+| `forte_limitado` | 75,0% | 1480 | 100,0% | 55,95% |
+
+Os valores são ilustrativos: servem para validar a fórmula de qualidade e custo, não são um benchmark real.
+
+#### Glossário das políticas
+
+| Política | O que é e o que faz |
+| --- | --- |
+| `sempre_barato` | Manda todas as linhas para o modelo barato (`llama3.2:3b`) e usa a nota e os tokens de resposta do barato. |
+| `sempre_forte` | Manda todas as linhas para o modelo forte. É a referência de 100% de qualidade e de custo. |
+| `aleatorio` | Escolhe o barato em 50% das linhas, com semente fixa (`42`), e o forte no restante. |
+| `perfeito` | Usa os rótulos reais como oráculo: escolhe o barato quando `nota_barato >= nota_forte` e o forte caso contrário. Mostra o teto possível, mas não é implementável em produção. |
+| `v1` | Decide por contagem de tokens: vai ao barato se a pergunta couber no `limiar_tokens_pergunta` e a pergunta + contexto couber na `janela_contexto_barato`; caso contrário, vai ao forte (com limite, se configurado). |
+| `v2` | Usa o classificador A (probabilidade de “o barato basta”) e o classificador B (faixa da resposta). Vai ao barato quando a probabilidade supera `limiar_probabilidade`; no forte com faixa média, aplica limite de tokens. |
+| `forte_limitado` | Manda todas as linhas ao forte, mas usa `nota_forte_limitado` e `tokens_resposta_forte_limitado`, isto é, o resultado do forte com teto de tokens. |
 
 ## Limitações
 
-- Apenas dois modelos participam do roteamento. Claude e DeepSeek existem como adapters opcionais, mas não entram na decisão desta versão.
-- O custo é **estimado** por um preço de referência, já que os modelos usados são gratuitos.
-- O roteador v1 não entende o conteúdo da pergunta: uma pergunta curta e pesada ("crie um CRUD completo") pode cair no barato.
-- O v2 depende de dados rotulados suficientes e é avaliado por documento para evitar vazamento.
-- Não há treinamento ou ajuste fino de LLM, interface web nem autenticação.
-- Dataset e par de modelos do RouterBench ainda serão definidos.
+- Apenas dois modelos participam da decisão.
+- O v1 não entende o conteúdo da pergunta. Uma pergunta curta e pesada pode cair no barato.
+- O v2 precisa de dados rotulados suficientes.
+- O custo é estimado por uma tabela de referência.
+- Não há interface web, autenticação ou ajuste fino de LLM.
+- O projeto não intercepta prompts de outros programas. Ele roda pela CLI ou por código Python.
 
+## Próximos passos
+
+- Calibrar `limiar_tokens_pergunta` na curva.
+- Calibrar `limiar_probabilidade` com o RouterBench.
+- Criar um servidor HTTP local compatível com OpenAI.
+- Ampliar o dataset e validar em mais documentos.
+
+## Documentação
+
+- [PRD](<Roteador de requisições para LLMs (custo × qualidade).md>) — problema, objetivos, requisitos e métricas.
+- [SPEC](SPEC.md) — arquitetura detalhada e camadas de implementação.
+- [Relatório de calibração do tokenizador](relatório_calibração_tokenizador.md).

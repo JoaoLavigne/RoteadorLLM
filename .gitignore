@@ -49,6 +49,4 @@ resultados/*.csv
 config.json
 
 # Documentos locais
-Guia de implementação do roteador de LLMs.md
-Roteador de requisições para LLMs (custo × qualidade).md
 testesMentoria.md

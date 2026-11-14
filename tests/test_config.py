@@ -28,6 +28,7 @@ def test_padroes_corretos():
     assert cfg.caminho_registro == "resultados/registro.csv"
     assert cfg.caminho_ml == "resultados/ml_ocorrencias.csv"
     assert cfg.caminho_dataset == "dados/dataset.csv"
+    assert cfg.caminho_modelo_v2 == "resultados/modelo_v2.joblib"
 
 
 def test_sem_caminho_usa_padroes():
