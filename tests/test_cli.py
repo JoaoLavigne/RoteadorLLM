@@ -3,7 +3,7 @@ from pathlib import Path
 
 from roteador.adapters.falso import AdapterFalso
 from roteador.cli import COLUNAS_COLETA, main
-from roteador.config import Config
+from roteador.config import Config, carregar_config
 from roteador.dados.carregador import COLUNAS_OBRIGATORIAS
 from roteador.ml.classificadores import carregar_modelo
 from roteador.ml.embedder import EmbedderFalso
@@ -363,3 +363,75 @@ def test_avaliar_inclui_a_politica_v2_quando_ha_modelo(tmp_path, capsys):
     assert codigo == 0
     assert "| v2 |" in saida.out
     assert "Política v2 ignorada" not in saida.err
+
+
+def _linhas_calibracao(nota_barato="correta", nota_forte="correta"):
+    return [
+        f"{documento}-{indice},doc-{documento},aberta,"
+        f"pergunta {documento} {indice},{nota_barato},{nota_forte},10,100"
+        for documento in range(10)
+        for indice in range(2)
+    ]
+
+
+def test_treinar_limiar_tokens_grava_csv_e_config(tmp_path, capsys):
+    cfg = _cfg(tmp_path)
+    _escrever_dataset(Path(cfg.caminho_dataset), _linhas_calibracao())
+
+    codigo = main(
+        ["treinar-limiar-tokens"],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+    )
+
+    saida = capsys.readouterr()
+    assert codigo == 0
+    assert "Limiar escolhido: 500 tokens" in saida.out
+    assert "Candidatos gravados em" in saida.out
+
+    pasta = Path(cfg.caminho_registro).parent
+    csv_saida = pasta / "calibracao_limiar_tokens.csv"
+    config_saida = pasta / "config_limiar_tokens.json"
+    assert csv_saida.exists()
+    assert config_saida.exists()
+
+    configuracao = carregar_config(config_saida)
+    assert configuracao.limiar_tokens_pergunta == 500
+
+
+def test_treinar_limiar_tokens_reprova_sem_meta(tmp_path, capsys):
+    cfg = _cfg(tmp_path)
+    _escrever_dataset(
+        Path(cfg.caminho_dataset),
+        _linhas_calibracao(nota_barato="errada", nota_forte="correta"),
+    )
+
+    codigo = main(
+        ["treinar-limiar-tokens"],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+    )
+
+    erro = capsys.readouterr().err
+    assert codigo == 1
+    assert "Configuração não adotada" in erro
+    pasta = Path(cfg.caminho_registro).parent
+    assert (pasta / "calibracao_limiar_tokens.csv").exists()
+    assert not (pasta / "config_limiar_tokens.json").exists()
+
+
+def test_treinar_limiar_tokens_com_dataset_inexistente_mostra_erro(
+    tmp_path, capsys
+):
+    cfg = _cfg(tmp_path)
+    caminho = tmp_path / "nao_existe.csv"
+
+    codigo = main(
+        ["treinar-limiar-tokens", "--dataset", str(caminho)],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+    )
+
+    erro = capsys.readouterr().err
+    assert codigo == 1
+    assert "Dataset não encontrado" in erro

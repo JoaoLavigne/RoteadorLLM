@@ -157,6 +157,7 @@ O comando divide o dataset por documento, treina os classificadores A e B, mostr
 | `roteador coletar --politica v1` | Roda uma política sobre o dataset e grava respostas para anotação. |
 | `roteador avaliar` | Gera `curva.csv` e o relatório de alertas sem chamar os modelos de resposta. |
 | `roteador treinar` | Treina e salva o modelo v2. |
+| `roteador treinar-limiar-tokens` | Calibra o limiar de tokens do v1 na validação e grava a configuração. |
 
 Políticas de coleta: `barato`, `forte`, `forte_limitado`, `v1` e `v2`.
 
@@ -177,6 +178,8 @@ Regras principais:
 - A separação treino/teste é feita **por documento**.
 - Resposta truncada sobe uma faixa de tamanho.
 - O mesmo esquema pode ficar em SQLite (`.db`, `.sqlite` ou `.sqlite3`).
+
+A calibração do `limiar_tokens_pergunta` exige dataset real rotulado: recomendado de 300 a 500 perguntas em 30 a 50 documentos, divididos por documento em treino, validação e teste. Dados sintéticos servem apenas para os testes automatizados.
 
 ## Arquitetura
 
@@ -235,6 +238,22 @@ O teste usa um dataset sintético de 4 linhas, um `TokenizadorFixo(10)` e preço
 
 Os valores são ilustrativos: servem para validar a fórmula de qualidade e custo, não são um benchmark real.
 
+### Ganho do limiar calibrado (cenário simulado)
+
+> **Cenário simulado.** Este número valida a mecânica do `ml/limiar.py`; não é um benchmark real nem deve ser usado como resultado do produto. A calibração válida depende do dataset real rotulado.
+
+```bash
+pytest tests/ml/test_limiar.py::test_calibrar_escolhe_limiar_com_economia_no_cenario_simulado -v
+```
+
+Cenário: 10 documentos com 2 perguntas cada. Nas perguntas curtas (10 tokens), o barato acerta; nas longas (100 tokens), o barato erra e o forte acerta. Preços padrão de `config.py`. A calibração divide por documento em treino, validação e teste, escolhe o maior limiar que mantém a meta na validação e confirma no teste.
+
+| Limiar escolhido | Qualidade vs. forte no teste | Economia no teste | Meta |
+| ---: | ---: | ---: | ---: |
+| 82 tokens | 100,0% | 45,7% | 95,0% |
+
+Em resumo: **no cenário simulado, manteve 100% da qualidade do forte gastando 45,7% menos**. O dataset real ainda precisa ser coletado e rotulado.
+
 #### Glossário das políticas
 
 | Política | O que é e o que faz |
@@ -258,7 +277,7 @@ Os valores são ilustrativos: servem para validar a fórmula de qualidade e cust
 
 ## Próximos passos
 
-- Calibrar `limiar_tokens_pergunta` na curva.
+- Calibrar `limiar_tokens_pergunta` com o dataset real (comando implementado).
 - Calibrar `limiar_probabilidade` com o RouterBench.
 - Criar um servidor HTTP local compatível com OpenAI.
 - Ampliar o dataset e validar em mais documentos.

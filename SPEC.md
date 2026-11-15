@@ -315,42 +315,58 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 
 1. **Usar dados rotulados próprios.**
    - Use o mesmo tokenizador que será usado em produção.
-
+   - Use apenas dados reais de produção ou anotados a partir deles. Dados sintéticos servem para testar a implementação, não para calibrar o limiar: o valor encontrado não transfere para produção.
+   - Campos obrigatórios: `id`, `documento`, `tipo`, `pergunta`, `nota_barato`, `nota_forte`, `tokens_resposta_barato` e `tokens_resposta_forte`. Opcionais: `contexto_tokens`, `truncada_forte`, `nota_forte_limitado` e `tokens_resposta_forte_limitado`.
+   - Notas aceitas: `correta` (2), `parcial` (1) ou `errada` (0).
+   - Tamanho mínimo viável: 150 a 300 perguntas em 20 a 30 documentos. Tamanho recomendado: 300 a 500 perguntas em 30 a 50 documentos, com 150 a 300 linhas em validação e 150 a 300 em teste. Menos que isso deixa os percentis (especialmente o P95) e a comparação com o forte instáveis.
+   - Cobertura importa mais que volume: varie tipos de pergunta, faixas de tokens (curta, média e longa), presença de contexto e dificuldade. Mil perguntas parecidas valem menos que 300 variadas.
+   - As notas precisam vir de rodar os modelos reais (barato e forte) e avaliar as respostas. Se um LLM fizer o julgamento, calibre-o contra 50 a 100 itens rotulados por humano e registre a concordância.
 
 2. **Separar os dados por documento.**
-   - Divida em treino, validação e teste com `dividir_por_documento`.
-
-3. **Contar os tokens de cada pergunta.**
+   - Divida em treino, validação e teste com `dividir_por_documento`. A implementação usa `dividir_calibracao`: 60% treino, 20% validação e 20% teste, por documento.
+   - A calibração escolhe o limiar na validação; o teste só confirma o resultado no fim.
+   - Nenhum documento pode aparecer em mais de um conjunto. Exija pelo menos 3 documentos (mínimo do comando) e, de preferência, 10 ou mais documentos no teste.
    - Lembre que a primeira regra do v1 usa pergunta + contexto. A segunda regra usa só a pergunta.
 
-4. **Montar a lista de candidatos.**
+3. **Montar a lista de candidatos.**
    - Use os percentis da distribuição de tokens das perguntas: 50, 60, 70, 80, 90 e 95.
    - Inclua também valores fixos úteis para comparação, por exemplo 100, 200, 300 e 500.
 
-5. **Simular o v1 para cada candidato.**
+4. **Simular o v1 para cada candidato.**
    - Para cada `T` candidato, crie uma cópia da `Config` com `limiar_tokens_pergunta=T` com as mesmas regras da camada v1.
 
-6. **Calcular as métricas de cada candidato.**
+5. **Calcular as métricas de cada candidato.**
    - Qualidade média: soma das notas dividida por `2 × número de linhas`.
    - Custo estimado: tokens de entrada e de saída multiplicados por `cfg.preco_ref`.
    - Compare com a política `sempre_forte`.
    - Calcule `qualidade_relativa_pct`, `custo_relativo_pct` e `economia_pct`.
    - Grave uma linha por candidato em `resultados/calibracao_limiar_tokens.csv`.
 
-7. **Escolher o limiar com um critério explícito.**
-   - Defina a meta em configuração, por exemplo `qualidade_minima_pct = 0.95`.
+6. **Escolher o limiar com um critério explícito.**
+   - Defina a meta, por exemplo `qualidade_minima_pct = 95` (porcentagem da qualidade do forte).
    - Escolha o maior `T` que mantém a qualidade relativa maior ou igual à meta. Um `T` maior envia menos perguntas ao forte e aumenta a economia.
+   - Se nenhum candidato atingir a meta, escolha o de melhor qualidade e registre um aviso.
 
-8. **Salvar o resultado.**
-   - Grave `resultados/config_limiar_tokens.json` com um objeto que o `carregar_config` aceite:
+7. **Salvar o resultado.**
+   - Grave `resultados/config_limiar_tokens.json` com um objeto que o `carregar_config` aceite. Como o carregador rejeita chaves desconhecidas, o JSON leva só `limiar_tokens_pergunta` e `tokenizador`; as métricas ficam no CSV.
+   - Se a validação no teste falhar, não grave o JSON e devolva código de saída 1.
 
-9. **Validar nos dados de teste.**
+8. **Validar nos dados de teste.**
    - Rode `roteador avaliar --config resultados/config_limiar_tokens.json`.
    - Compare a linha `v1` com `sempre_forte` e com o valor anterior.
    - Se a qualidade no teste ficar abaixo da meta, não adote o limiar.
-   
 
-- **Pronto quando:** o comando gera um `config_limiar_tokens.json` reproduzível, com o limiar escolhido e as métricas. 
+9. **Adicionar o subcomando `treinar-limiar-tokens`.**
+   ```bash
+   roteador treinar-limiar-tokens \
+     --dataset dados/dataset.csv \
+     --saida resultados/config_limiar_tokens.json \
+     --csv resultados/calibracao_limiar_tokens.csv \
+     --qualidade-minima 95
+   ```
+
+- **Pronto quando:** o comando gera um `config_limiar_tokens.json` reproduzível, com o limiar escolhido, e um CSV com as métricas dos candidatos.
+- **Estado:** implementação e testes com dataset sintético prontos. Falta o dataset real rotulado para produzir um limiar válido.
 - **Aviso:** este limiar vale para o v1. O v2 usa `limiar_probabilidade`. O valor depende do tokenizador. Se o tokenizador mudar, calibre o limiar de novo.
 
 ### Camada 15: treinar `limiar_probabilidade` com RouterBench
@@ -442,6 +458,8 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 - [x] Camada 12: embedder e classificadores
 - [x] Camada 13: roteador v2
 - [ ] Camada 14: treinar `limiar_tokens_pergunta` v1 na curva
+  - [x] Implementação e dataset sintético de testes
+  - [ ] Calibração com o dataset real rotulado
 - [ ] Camada 15: treinar `limiar_probabilidade` v2 com RouterBench
 - [ ] Camada 16: servidor HTTP local compatível com OpenAI
 

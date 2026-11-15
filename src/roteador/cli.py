@@ -38,6 +38,13 @@ from roteador.ml.classificadores import (
     salvar_modelo,
 )
 from roteador.ml.embedder import Embedder, EmbedderOllama, ErroEmbedder
+from roteador.ml.limiar import (
+    QUALIDADE_MINIMA_PCT,
+    calibrar_limiar_tokens,
+    salvar_calibracao,
+    salvar_config_limiar,
+    tabela_calibracao,
+)
 from roteador.ml.roteador_v2 import (
     RoteadorV2,
     montar_features_linhas,
@@ -149,6 +156,8 @@ def main(
             return _cmd_avaliar(args, cfg, tokenizador, embedder)
         if args.comando == "treinar":
             return _cmd_treinar(args, cfg, tokenizador, embedder)
+        if args.comando == "treinar-limiar-tokens":
+            return _cmd_treinar_limiar_tokens(args, cfg, tokenizador)
     except (
         ErroAdapter,
         ErroEmbedder,
@@ -220,6 +229,30 @@ def _criar_parser() -> argparse.ArgumentParser:
     )
     treinar.add_argument("--dataset", help="Dataset de entrada.")
     treinar.add_argument("--saida", help="Arquivo joblib de saída do modelo.")
+
+    limiar = subcomandos.add_parser(
+        "treinar-limiar-tokens",
+        parents=[comum],
+        help="Calibra o limiar de tokens do roteador v1 na curva.",
+    )
+    limiar.add_argument("--dataset", help="Dataset de entrada.")
+    limiar.add_argument(
+        "--saida",
+        help="Arquivo JSON de configuração com o limiar escolhido.",
+    )
+    limiar.add_argument(
+        "--csv",
+        help="Arquivo CSV com as métricas de cada candidato.",
+    )
+    limiar.add_argument(
+        "--qualidade-minima",
+        type=float,
+        default=QUALIDADE_MINIMA_PCT,
+        help=(
+            "Qualidade relativa mínima ao forte, em porcentagem "
+            f"(padrão {QUALIDADE_MINIMA_PCT:.0f})."
+        ),
+    )
 
     return parser
 
@@ -374,6 +407,50 @@ def _cmd_treinar(
         )
         print(f"Acurácia do classificador A: {metricas_a['acuracia']:.3f}")
         print(f"Acurácia do classificador B: {metricas_b['acuracia']:.3f}")
+    return 0
+
+
+def _cmd_treinar_limiar_tokens(
+    args: argparse.Namespace,
+    cfg: Config,
+    tokenizador: Tokenizador,
+) -> int:
+    dataset = Path(args.dataset or cfg.caminho_dataset)
+    linhas = carregar_dataset(dataset)
+
+    calibracao = calibrar_limiar_tokens(
+        linhas,
+        cfg,
+        tokenizador,
+        qualidade_minima_pct=args.qualidade_minima,
+    )
+
+    pasta = Path(cfg.caminho_registro).parent
+    csv_saida = Path(args.csv) if args.csv else pasta / "calibracao_limiar_tokens.csv"
+    config_saida = (
+        Path(args.saida) if args.saida else pasta / "config_limiar_tokens.json"
+    )
+
+    salvar_calibracao(calibracao, csv_saida)
+    print(tabela_calibracao(calibracao))
+    print(f"\nCandidatos gravados em {csv_saida}.")
+
+    if calibracao.aviso_selecao:
+        print(f"Aviso: {calibracao.aviso_selecao}", file=sys.stderr)
+    if calibracao.aviso_teste:
+        print(f"Aviso: {calibracao.aviso_teste}", file=sys.stderr)
+    if not calibracao.aprovado:
+        print(
+            "Configuração não adotada. Ajuste a meta ou colete mais dados.",
+            file=sys.stderr,
+        )
+        return 1
+
+    salvar_config_limiar(calibracao, cfg, config_saida)
+    print(
+        f"Limiar escolhido: {calibracao.limiar_escolhido} tokens. "
+        f"Configuração gravada em {config_saida}."
+    )
     return 0
 
 
