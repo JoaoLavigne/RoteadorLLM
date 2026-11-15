@@ -225,22 +225,10 @@ Os testes não usam rede, Ollama ou Gemini. Eles usam adapters falsos, `tmp_path
 pytest tests/avaliacao/test_politicas.py::test_avalia_politicas_com_resultado_calculado_a_mao -v
 ```
 
-Resultado: `1 passed in 0.03s`.
-
-O teste usa um dataset sintético de 4 linhas, um `TokenizadorFixo(10)` e preços de referência fixos na configuração. Ele verifica os valores calculados à mão:
-
-| Política | Qualidade média | Custo estimado | Qualidade vs. forte | Economia |
-| --- | ---: | ---: | ---: | ---: |
-| `sempre_barato` | 62,5% | 140 | 83,3% | 95,0% |
-| `sempre_forte` | 75,0% | 2800 | 100,0% | 0,0% |
-| `perfeito` | 87,5% | 950 | 116,7% | 66,07% |
-| `forte_limitado` | 75,0% | 1480 | 100,0% | 55,95% |
-
-Os valores são ilustrativos: servem para validar a fórmula de qualidade e custo, não são um benchmark real.
 
 ### Ganho do limiar calibrado (cenário simulado)
 
-> **Cenário simulado.** Este número valida a mecânica do `ml/limiar.py`; não é um benchmark real nem deve ser usado como resultado do produto. A calibração válida depende do dataset real rotulado.
+> **Cenário simulado (temporário).** Este número valida a mecânica do `ml/limiar.py`; não é um benchmark real nem vai ser usado como resultado do produto.
 
 ```bash
 pytest tests/ml/test_limiar.py::test_calibrar_escolhe_limiar_com_economia_no_cenario_simulado -v
@@ -262,7 +250,7 @@ Em resumo: **no cenário simulado, manteve 100% da qualidade do forte gastando 4
 | `sempre_forte` | Manda todas as linhas para o modelo forte. É a referência de 100% de qualidade e de custo. |
 | `aleatorio` | Escolhe o barato em 50% das linhas, com semente fixa (`42`), e o forte no restante. |
 | `perfeito` | Usa os rótulos reais como oráculo: escolhe o barato quando `nota_barato >= nota_forte` e o forte caso contrário. Mostra o teto possível, mas não é implementável em produção. |
-| `v1` | Decide por contagem de tokens: vai ao barato se a pergunta couber no `limiar_tokens_pergunta` e a pergunta + contexto couber na `janela_contexto_barato`; caso contrário, vai ao forte (com limite, se configurado). |
+| `v1` | Decide por contagem de tokens: vai ao barato se a pergunta couber no `limiar_tokens_pergunta` e a pergunta + contexto couber na `janela_contexto_barato`; caso contrário, vai ao forte. |
 | `v2` | Usa o classificador A (probabilidade de “o barato basta”) e o classificador B (faixa da resposta). Vai ao barato quando a probabilidade supera `limiar_probabilidade`; no forte com faixa média, aplica limite de tokens. |
 | `forte_limitado` | Manda todas as linhas ao forte, mas usa `nota_forte_limitado` e `tokens_resposta_forte_limitado`, isto é, o resultado do forte com teto de tokens. |
 
