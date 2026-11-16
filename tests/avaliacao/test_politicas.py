@@ -89,6 +89,34 @@ def test_avalia_politicas_com_resultado_calculado_a_mao():
     assert perfeito.qualidade_relativa_pct == pytest.approx(116.666667, rel=1e-5)
 
 
+def test_qualidade_usa_o_score_bruto_quando_presente():
+    linhas = [
+        _linha(
+            id="1",
+            nota_barato=Nota.CORRETA,
+            nota_forte=Nota.CORRETA,
+            score_barato=0.75,
+            score_forte=1.0,
+        ),
+        _linha(
+            id="2",
+            nota_barato=Nota.CORRETA,
+            nota_forte=Nota.CORRETA,
+            score_barato=0.25,
+            score_forte=0.5,
+        ),
+    ]
+
+    resultados = _por_nome(
+        avaliar_politicas(linhas, _cfg(), tokenizador=TokenizadorFixo(10))
+    )
+
+    assert resultados["sempre_barato"].qualidade_media == pytest.approx(0.5)
+    assert resultados["sempre_forte"].qualidade_media == pytest.approx(0.75)
+    assert resultados["v1"].qualidade_media == pytest.approx(0.5)
+    assert resultados["perfeito"].qualidade_media == pytest.approx(0.75)
+
+
 def test_perfeito_nunca_perde_em_qualidade():
     resultados = avaliar_politicas(
         _dataset(), _cfg(), tokenizador=TokenizadorFixo(10)

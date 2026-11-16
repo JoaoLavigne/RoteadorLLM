@@ -124,3 +124,25 @@ def test_embedder_ollama_vetores_irregulares():
 
     with pytest.raises(ErroEmbedder, match="matriz"):
         embedder.embutir(["a", "b"])
+
+
+def test_embedder_ollama_divide_em_lotes_e_preserva_a_ordem():
+    chamadas = []
+
+    def post(url, json):
+        textos = json["input"]
+        chamadas.append(list(textos))
+        return RespostaFake(
+            {"embeddings": [[float(indice)] for indice in range(len(textos))]}
+        )
+
+    embedder = EmbedderOllama(post=post, lote=2)
+    vetores = embedder.embutir(["a", "b", "c", "d", "e"])
+
+    assert chamadas == [["a", "b"], ["c", "d"], ["e"]]
+    assert vetores.shape == (5, 1)
+
+
+def test_embedder_ollama_rejeita_lote_invalido():
+    with pytest.raises(ValueError, match="lote"):
+        EmbedderOllama(lote=0)

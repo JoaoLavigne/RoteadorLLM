@@ -131,7 +131,8 @@ def _features(
     return montar_features(embeddings, tokens)
 
 
-def _probabilidade_barato(modelo_a: Any, features: np.ndarray) -> float:
+def probabilidades_barato(modelo_a: Any, features: np.ndarray) -> np.ndarray:
+    """Devolve a probabilidade de "o barato basta" para cada linha."""
     try:
         probabilidades = np.asarray(modelo_a.predict_proba(features), dtype=float)
     except Exception as exc:
@@ -155,7 +156,11 @@ def _probabilidade_barato(modelo_a: Any, features: np.ndarray) -> float:
             )
         indice = _indice_da_classe_verdadeira(classes)
 
-    return float(probabilidades[0, indice])
+    return probabilidades[:, indice]
+
+
+def _probabilidade_barato(modelo_a: Any, features: np.ndarray) -> float:
+    return float(probabilidades_barato(modelo_a, features)[0])
 
 
 def _indice_da_classe_verdadeira(classes: Sequence[Any]) -> int:

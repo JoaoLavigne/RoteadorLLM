@@ -18,9 +18,15 @@ _FAIXAS_EM_ORDEM = (Faixa.CURTA, Faixa.MEDIA, Faixa.LONGA)
 def barato_basta(linha: LinhaDataset | Mapping[str, Any]) -> bool:
     """Diz se o barato iguala ou supera o forte na qualidade.
 
-    As notas viram números: correta = 2, parcial = 1, errada = 0. Empate conta
-    como "o barato basta".
+    Quando a linha tem o score bruto dos dois modelos, a comparação usa esse
+    score. Caso contrário, as notas viram números: correta = 2, parcial = 1,
+    errada = 0. Empate conta como "o barato basta".
     """
+    score_barato = _campo_da_linha(linha, "score_barato")
+    score_forte = _campo_da_linha(linha, "score_forte")
+    if score_barato is not None and score_forte is not None:
+        return float(score_barato) >= float(score_forte)
+
     nota_barato = _nota_da_linha(linha, "nota_barato")
     nota_forte = _nota_da_linha(linha, "nota_forte")
     return nota_barato >= nota_forte

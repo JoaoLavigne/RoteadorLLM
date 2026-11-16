@@ -435,3 +435,149 @@ def test_treinar_limiar_tokens_com_dataset_inexistente_mostra_erro(
     erro = capsys.readouterr().err
     assert codigo == 1
     assert "Dataset não encontrado" in erro
+
+
+class EmbedderPorPrefixo:
+    nome = "prefixo"
+
+    def embutir(self, textos):
+        return [
+            [1.0, 0.0] if texto.startswith("facil") else [0.0, 1.0]
+            for texto in textos
+        ]
+
+
+def _escrever_routerbench(caminho):
+    colunas = [
+        "sample_id",
+        "prompt",
+        "eval_name",
+        "barato",
+        "barato|model_response",
+        "barato|total_cost",
+        "forte",
+        "forte|model_response",
+        "forte|total_cost",
+    ]
+    registros = []
+    for indice in range(30):
+        facil = indice % 2 == 0
+        registros.append(
+            {
+                "sample_id": f"pergunta.{indice}",
+                "prompt": (
+                    f"facil {indice}" if facil else f"dificil {indice}"
+                ),
+                "eval_name": "teste",
+                "barato": 1.0 if facil else 0.0,
+                "barato|model_response": "resposta",
+                "barato|total_cost": 0.001,
+                "forte": 1.0,
+                "forte|model_response": "resposta",
+                "forte|total_cost": 0.01,
+            }
+        )
+
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    with caminho.open("w", encoding="utf-8", newline="") as aberto:
+        escritor = csv.DictWriter(aberto, fieldnames=colunas)
+        escritor.writeheader()
+        escritor.writerows(registros)
+    return caminho
+
+
+def test_treinar_limiar_probabilidade_grava_modelo_csv_e_config(
+    tmp_path, capsys
+):
+    cfg = _cfg(tmp_path)
+    caminho = _escrever_routerbench(tmp_path / "routerbench.csv")
+    embedder = EmbedderPorPrefixo()
+
+    codigo = main(
+        [
+            "treinar-limiar-probabilidade",
+            "--routerbench",
+            str(caminho),
+            "--barato",
+            "barato",
+            "--forte",
+            "forte",
+            "--meta",
+            "0.95",
+        ],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+        embedder=embedder,
+    )
+
+    saida = capsys.readouterr().out
+    assert codigo == 0
+    assert "Limiar escolhido:" in saida
+    assert "Modelo v2 gravado em" in saida
+
+    pasta = Path(cfg.caminho_registro).parent
+    csv_saida = pasta / "calibracao_limiar_probabilidade.csv"
+    config_saida = pasta / "config_limiar_probabilidade.json"
+    assert csv_saida.exists()
+    assert config_saida.exists()
+
+    configuracao = carregar_config(config_saida)
+    assert 0 <= configuracao.limiar_probabilidade <= 1
+
+    modelo = carregar_modelo(
+        Path(cfg.caminho_modelo_v2), embedder_esperado=embedder
+    )
+    assert modelo.embedder_nome == embedder.nome
+
+
+def test_treinar_limiar_probabilidade_com_arquivo_inexistente_mostra_erro(
+    tmp_path, capsys
+):
+    cfg = _cfg(tmp_path)
+
+    codigo = main(
+        [
+            "treinar-limiar-probabilidade",
+            "--routerbench",
+            str(tmp_path / "nao_existe.csv"),
+            "--barato",
+            "barato",
+            "--forte",
+            "forte",
+        ],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+        embedder=EmbedderPorPrefixo(),
+    )
+
+    erro = capsys.readouterr().err
+    assert codigo == 1
+    assert "não encontrado" in erro
+
+
+def test_treinar_limiar_probabilidade_com_meta_invalida_mostra_erro(
+    tmp_path, capsys
+):
+    cfg = _cfg(tmp_path)
+    caminho = _escrever_routerbench(tmp_path / "routerbench.csv")
+
+    codigo = main(
+        [
+            "treinar-limiar-probabilidade",
+            "--routerbench",
+            str(caminho),
+            "--barato",
+            "barato",
+            "--forte",
+            "forte",
+            "--meta",
+            "1.5",
+        ],
+        cfg=cfg,
+        tokenizador=TokenizadorFixo(1),
+        embedder=EmbedderPorPrefixo(),
+    )
+
+    erro = capsys.readouterr().err
+    assert codigo == 1
+    assert "fração entre 0 e 1" in erro

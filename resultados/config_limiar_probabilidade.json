@@ -1,0 +1,4 @@
+{
+  "limiar_probabilidade": 0.81,
+  "tokenizador": "tiktoken:o200k_base"
+}

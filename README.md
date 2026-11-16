@@ -64,9 +64,19 @@ pergunta + contexto
 | Versão | Como decide | Quando usar |
 | --- | --- | --- |
 | **v1** | Contagem de tokens da pergunta e janela de contexto | Primeiro uso, sem modelo treinado |
-| **v2** | Classificador A (“o barato basta?”) + classificador B (faixa da resposta) | Depois de treinar com dados rotulados |
+| **v2** | Classificador A (“o barato basta?”) + classificador B (faixa da resposta) | Depois de treinar com dados rotulados(Router Bench) |
 
 O v2 usa o embedding da pergunta e o `log1p` da contagem de tokens. O modelo B prevê a faixa `curta`, `media` ou `longa`. No forte com faixa média, o roteador aplica um limite de tokens.
+
+### Resultados medidos
+
+Teste feito no recorte do RouterBench com 6.000 prompts, usando o mesmo conjunto de teste de 1.200 linhas e o par Yi-34B-Chat (barato) / gpt-4 (forte):
+
+| Versão | Configuração | Qualidade vs. forte | Economia |
+| --- | --- | ---: | ---: |
+| **v1** | limiar de 100 tokens | 94,4% | 14,2% |
+| **v2** | limiar de probabilidade 0,81 | 97,0% | 17,9% |
+
 
 ## Requisitos
 
@@ -149,6 +159,22 @@ roteador treinar
 
 O comando divide o dataset por documento, treina os classificadores A e B, mostra a acurácia no conjunto de teste e salva o modelo em `resultados/modelo_v2.joblib`.
 
+### Calibrar o limiar de probabilidade do v2
+
+```bash
+roteador treinar-limiar-probabilidade \
+  --routerbench dados/routerbench/recorte.csv \
+  --barato zero-one-ai/Yi-34B-Chat \
+  --forte gpt-4-1106-preview \
+  --meta 0.95
+```
+
+O comando converte o par de modelos do RouterBench, divide por prompt, treina A e B, calibra `limiar_probabilidade` na validação, confirma no teste e grava o modelo, `calibracao_limiar_probabilidade.csv` e `config_limiar_probabilidade.json`. Se a meta falhar, a configuração não é adotada e o código de saída é 1.
+
+O recorte versionado é `dados/routerbench/recorte_yi_gpt4_0shot.csv` (6.000 prompts do par Yi-34B/gpt-4). A calibração de referência usa `--meta 0.95` e o embedder `nomic-embed-text`.
+
+Essa etapa gera uma pré-calibração. A validação final com dados próprios é a Implementação 17 do SPEC e exige um `dados/dataset.csv` real rotulado.
+
 ## Comandos
 
 | Comando | O que faz |
@@ -158,6 +184,7 @@ O comando divide o dataset por documento, treina os classificadores A e B, mostr
 | `roteador avaliar` | Gera `curva.csv` e o relatório de alertas sem chamar os modelos de resposta. |
 | `roteador treinar` | Treina e salva o modelo v2. |
 | `roteador treinar-limiar-tokens` | Calibra o limiar de tokens do v1 na validação e grava a configuração. |
+| `roteador treinar-limiar-probabilidade` | Treina o v2 com o RouterBench, calibra `limiar_probabilidade` e grava modelo, CSV e configuração. |
 
 Políticas de coleta: `barato`, `forte`, `forte_limitado`, `v1` e `v2`.
 
@@ -261,7 +288,7 @@ Em resumo: **no cenário simulado, manteve 100% da qualidade do forte gastando 4
 - O v2 precisa de dados rotulados suficientes.
 - O custo é estimado por uma tabela de referência.
 - Não há interface web, autenticação ou ajuste fino de LLM.
-- O projeto não intercepta prompts de outros programas. Ele roda pela CLI ou por código Python.
+
 
 ## Próximos passos
 
@@ -273,5 +300,5 @@ Em resumo: **no cenário simulado, manteve 100% da qualidade do forte gastando 4
 ## Documentação
 
 - [PRD](<Roteador de requisições para LLMs (custo × qualidade).md>) — problema, objetivos, requisitos e métricas.
-- [SPEC](SPEC.md) — arquitetura detalhada e camadas de implementação.
+- [SPEC](SPEC.md) — arquitetura detalhada e implementações.
 - [Relatório de calibração do tokenizador](relatório_calibração_tokenizador.md).

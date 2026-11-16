@@ -1,6 +1,6 @@
 """Leitura e tipagem do dataset usado na avaliação e no treino.
 
-O dataset pode vir de CSV ou de SQLite. As demais camadas recebem sempre a
+O dataset pode vir de CSV ou de SQLite. As demais partes recebem sempre a
 mesma lista de ``LinhaDataset`` e não sabem qual armazenamento foi usado.
 """
 
@@ -114,6 +114,8 @@ class LinhaDataset:
     truncada_forte: bool = False
     nota_forte_limitado: Nota | None = None
     tokens_resposta_forte_limitado: int | None = None
+    score_barato: float | None = None
+    score_forte: float | None = None
 
 
 @runtime_checkable

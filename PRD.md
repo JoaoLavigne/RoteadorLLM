@@ -5,7 +5,7 @@
 | **Produto** | Roteador de LLMs (custo × qualidade) |
 | **Versão do documento** | 1.0 |
 | **Versão do produto** | 0.1.0 (MVP) |
-| **Status** | Em desenvolvimento. Camadas 0–13 implementadas. Camadas 14–16 planejadas. |
+| **Status** | Em desenvolvimento. Implementações 0–13 implementadas. Implementações 14–17 planejadas. |
 | **Última atualização** | 2026-11-13 |
 | **Público** | Engenharia, produto, pesquisa e avaliação técnica |
 | **Documentos relacionados** | [README](README.md) e [SPEC](SPEC.md) |
@@ -144,7 +144,7 @@ A avaliação roda sobre o dataset já gravado. Ela compara políticas e gera a 
 
 ### 6.1 Escopo entregue no MVP
 
-- Camadas 0–13 da [SPEC](SPEC.md).
+- Implementações 0–13 da [SPEC](SPEC.md).
 - Roteador v1 determinístico.
 - Roteador v2 com classificadores A e B.
 - Adapters Ollama e Gemini.
@@ -158,11 +158,12 @@ A avaliação roda sobre o dataset já gravado. Ela compara políticas e gera a 
 
 ### 6.2 Incrementos planejados
 
-| Camada | Incremento | Resultado esperado |
+| Implementação | Incremento | Resultado esperado |
 | --- | --- | --- |
 | 14 | Calibrar `limiar_tokens_pergunta` na curva | Limiar do v1 com evidência |
 | 15 | Calibrar `limiar_probabilidade` com RouterBench | Limiar do v2 com dados externos |
 | 16 | Servidor HTTP local compatível com OpenAI | Uso por clientes externos |
+| 17 | Validar o limiar nos dados próprios | Limiar do v2 confirmado em produção |
 
 ### 6.3 Fora de escopo
 
@@ -193,7 +194,7 @@ A avaliação roda sobre o dataset já gravado. Ela compara políticas e gera a 
 | **RF-12** | Avaliar políticas offline | A curva gera qualidade, custo e percentuais |
 | **RF-13** | Treinar o v2 | O modelo A e o modelo B são salvos com `joblib` |
 | **RF-14** | Expor uma CLI | Os subcomandos funcionam com `--config` |
-| **RF-15** | Expor um servidor HTTP compatível com OpenAI | *Planejado na camada 16* |
+| **RF-15** | Expor um servidor HTTP compatível com OpenAI | *Planejado na implementação 16* |
 
 ### 7.2 Requisitos não funcionais
 
@@ -206,7 +207,7 @@ A avaliação roda sobre o dataset já gravado. Ela compara políticas e gera a 
 | **RNF-05** | Segurança | Nenhuma chave é gravada no repositório |
 | **RNF-06** | Observabilidade | Cada decisão pode ser auditada no registro |
 | **RNF-07** | Armazenamento substituível | Um novo `Registro` pode substituir o CSV |
-| **RNF-08** | Documentação | README explica instalação e uso; SPEC explica as camadas |
+| **RNF-08** | Documentação | README explica instalação e uso; SPEC explica as implementações |
 
 ## 8. Métricas de sucesso
 
@@ -272,7 +273,7 @@ Regras:
 
 ### 10.3 RouterBench
 
-O RouterBench pode apoiar a calibração do `limiar_probabilidade` na camada 15. Ele não substitui a avaliação final nos dados próprios.
+O RouterBench pode apoiar a calibração do `limiar_probabilidade` na implementação 15. Ele não substitui a avaliação final nos dados próprios.
 
 ## 11. Riscos e mitigação
 

@@ -29,6 +29,10 @@ from roteador.dados.rotulos import (
     dividir_por_documento,
     faixa_da_linha,
 )
+from roteador.dados.routerbench import (
+    carregar_dataframe,
+    converter_para_dataset,
+)
 from roteador.ml.classificadores import (
     CLASSES_B,
     ErroModelo,
@@ -40,10 +44,15 @@ from roteador.ml.classificadores import (
 from roteador.ml.embedder import Embedder, EmbedderOllama, ErroEmbedder
 from roteador.ml.limiar import (
     QUALIDADE_MINIMA_PCT,
+    calibrar_limiar_probabilidade,
     calibrar_limiar_tokens,
+    dividir_calibracao,
     salvar_calibracao,
+    salvar_calibracao_probabilidade,
     salvar_config_limiar,
+    salvar_config_limiar_probabilidade,
     tabela_calibracao,
+    tabela_calibracao_probabilidade,
 )
 from roteador.ml.roteador_v2 import (
     RoteadorV2,
@@ -158,6 +167,10 @@ def main(
             return _cmd_treinar(args, cfg, tokenizador, embedder)
         if args.comando == "treinar-limiar-tokens":
             return _cmd_treinar_limiar_tokens(args, cfg, tokenizador)
+        if args.comando == "treinar-limiar-probabilidade":
+            return _cmd_treinar_limiar_probabilidade(
+                args, cfg, tokenizador, embedder
+            )
     except (
         ErroAdapter,
         ErroEmbedder,
@@ -252,6 +265,48 @@ def _criar_parser() -> argparse.ArgumentParser:
             "Qualidade relativa mínima ao forte, em porcentagem "
             f"(padrão {QUALIDADE_MINIMA_PCT:.0f})."
         ),
+    )
+
+    probabilidade = subcomandos.add_parser(
+        "treinar-limiar-probabilidade",
+        parents=[comum],
+        help="Calibra o limiar de probabilidade do roteador v2 com o RouterBench.",
+    )
+    probabilidade.add_argument(
+        "--routerbench",
+        required=True,
+        help="Arquivo do recorte do RouterBench (.pkl ou .csv).",
+    )
+    probabilidade.add_argument(
+        "--barato",
+        required=True,
+        help="Coluna do modelo barato no RouterBench.",
+    )
+    probabilidade.add_argument(
+        "--forte",
+        required=True,
+        help="Coluna do modelo forte no RouterBench.",
+    )
+    probabilidade.add_argument(
+        "--meta",
+        type=float,
+        default=QUALIDADE_MINIMA_PCT / 100,
+        help=(
+            "Qualidade relativa mínima ao forte, como fração entre 0 e 1 "
+            f"(padrão {QUALIDADE_MINIMA_PCT / 100:.2f})."
+        ),
+    )
+    probabilidade.add_argument(
+        "--saida",
+        help="Arquivo JSON de configuração com o limiar escolhido.",
+    )
+    probabilidade.add_argument(
+        "--csv",
+        help="Arquivo CSV com as métricas de cada candidato.",
+    )
+    probabilidade.add_argument(
+        "--modelo",
+        help="Arquivo joblib de saída do modelo v2 treinado.",
     )
 
     return parser
@@ -449,6 +504,73 @@ def _cmd_treinar_limiar_tokens(
     salvar_config_limiar(calibracao, cfg, config_saida)
     print(
         f"Limiar escolhido: {calibracao.limiar_escolhido} tokens. "
+        f"Configuração gravada em {config_saida}."
+    )
+    return 0
+
+
+def _cmd_treinar_limiar_probabilidade(
+    args: argparse.Namespace,
+    cfg: Config,
+    tokenizador: Tokenizador,
+    embedder: Embedder | None = None,
+) -> int:
+    if not 0 < args.meta <= 1:
+        raise ValueError("A meta deve ser uma fração entre 0 e 1.")
+
+    dados = carregar_dataframe(args.routerbench)
+    linhas = converter_para_dataset(
+        dados, args.barato, args.forte, tokenizador=tokenizador
+    )
+    treino, validacao, teste = dividir_calibracao(linhas)
+
+    embedder = embedder or EmbedderOllama(cfg.embedder_modelo)
+    modelo = treinar_modelo_v2(treino, embedder, tokenizador, cfg)
+
+    modelo_saida = Path(args.modelo or cfg.caminho_modelo_v2)
+    salvar_modelo(modelo, modelo_saida)
+
+    calibracao = calibrar_limiar_probabilidade(
+        validacao,
+        teste,
+        modelo,
+        embedder,
+        tokenizador,
+        cfg,
+        qualidade_minima_pct=args.meta * 100,
+    )
+
+    pasta = Path(cfg.caminho_registro).parent
+    csv_saida = (
+        Path(args.csv)
+        if args.csv
+        else pasta / "calibracao_limiar_probabilidade.csv"
+    )
+    config_saida = (
+        Path(args.saida)
+        if args.saida
+        else pasta / "config_limiar_probabilidade.json"
+    )
+
+    salvar_calibracao_probabilidade(calibracao, csv_saida)
+    print(tabela_calibracao_probabilidade(calibracao))
+    print(f"\nCandidatos gravados em {csv_saida}.")
+    print(f"Modelo v2 gravado em {modelo_saida}.")
+
+    if calibracao.aviso_selecao:
+        print(f"Aviso: {calibracao.aviso_selecao}", file=sys.stderr)
+    if calibracao.aviso_teste:
+        print(f"Aviso: {calibracao.aviso_teste}", file=sys.stderr)
+    if not calibracao.aprovado:
+        print(
+            "Configuração não adotada. Ajuste a meta ou use mais dados.",
+            file=sys.stderr,
+        )
+        return 1
+
+    salvar_config_limiar_probabilidade(calibracao, cfg, config_saida)
+    print(
+        f"Limiar escolhido: {calibracao.limiar_escolhido:.2f}. "
         f"Configuração gravada em {config_saida}."
     )
     return 0

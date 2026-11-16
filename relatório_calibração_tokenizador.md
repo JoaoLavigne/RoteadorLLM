@@ -7,18 +7,18 @@
 
 ## Resumo
 
-- O corpus solicitado foi o texto da **Camada 4** do guia (detector de respostas vazias ou truncadas).
+- O corpus solicitado foi o texto da **Implementação 4** do guia (detector de respostas vazias ou truncadas).
 - Nesse corpus, o melhor divisor ficou em **3,5** (MAPE de 16,0%), com empate técnico com o divisor **3**.
 - O divisor **4** ficou com razão média de **1,205** e MAPE de **22,2%**, ou seja, o aproximado subestimou os tokens reais nesse texto.
 
 ## 1. Objetivo
 
-Verificar se o divisor do `TokenizadorAproximado` está adequado quando comparado à contagem real do `tiktoken`, seguindo a Camada 1 do guia.
+Verificar se o divisor do `TokenizadorAproximado` está adequado quando comparado à contagem real do `tiktoken`, seguindo a Implementação 1 do guia.
 
 
 ## 2. Corpus usado
 
-O texto da Camada 4 foi limpo de marcações Markdown e dividido em frases.
+O texto da Implementação 4 foi limpo de marcações Markdown e dividido em frases.
 
 | Item | Valor |
 | --- | ---: |
@@ -54,7 +54,7 @@ Métricas usadas:
 
 Critério de alerta definido para esta análise: razão média fora de `[0,9; 1,1]` ou MAPE acima de `10%`.
 
-## 4. Resultados no corpus da Camada 4
+## 4. Resultados no corpus da Implementação 4
 
 | Divisor | Tokens aproximados | Razão total | Razão média | MAPE |
 | ---: | ---: | ---: | ---: | ---: |
@@ -75,7 +75,7 @@ Leitura:
 
 ## 5. Controle com prosa em português
 
-Como o corpus da Camada 4 tem muito código, fiz um controle rápido com 5 frases de prosa em português, mais parecidas com as perguntas reais do projeto.
+Como o corpus da Implementação 4 tem muito código, fiz um controle rápido com 5 frases de prosa em português, mais parecidas com as perguntas reais do projeto.
 
 | Divisor | Razão média | MAPE |
 | ---: | ---: | ---: |
@@ -96,7 +96,7 @@ Nesse controle, o melhor divisor foi **4,5**. Ou seja, o divisor ideal muda conf
 
 Motivos:
 
-1. O corpus solicitado é o da Camada 4, que é técnico e cheio de identificadores; O resultado não foi o esperado, mas para primeira versão do projeto serve.
+1. O corpus solicitado é o da Implementação 4, que é técnico e cheio de identificadores; O resultado não foi o esperado, mas para primeira versão do projeto serve.
 2. No controle com prosa em português, o divisor 4 teve erro de 11,7%, bem melhor que o 3 ou 3,5.
 
 

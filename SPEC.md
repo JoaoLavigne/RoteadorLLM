@@ -1,17 +1,17 @@
 # Guia de implementação do roteador de LLMs
 
-*Instruções para a LLM que vai programar o projeto, uma camada por vez. Base: documento “Roteador de requisições para LLMs (custo × qualidade)”.*
+*Instruções para a LLM que vai programar o projeto, uma implementação por vez. Base: documento “Roteador de requisições para LLMs (custo × qualidade)”.*
 
 ## 1. Como usar este documento
 
-1. A cada pedido, cole as seções 2 a 6, a seção da camada pedida (seção 7) e um resumo das camadas já prontas: só nomes de arquivos e assinaturas de funções.
-2. Peça **uma camada por vez**. Cada camada termina com testes passando.
-3. Ao terminar uma camada, atualize a seção 8.
+1. A cada pedido, cole as seções 2 a 6, a seção da implementação pedida (seção 7) e um resumo das implementações já prontas: só nomes de arquivos e assinaturas de funções.
+2. Peça **uma implementação por vez**. Cada implementação termina com testes passando.
+3. Ao terminar uma implementação, atualize a seção 8.
 
 **Regras para a LLM**
 
-- Implemente só a camada pedida. Se faltar informação, pergunte em vez de inventar.
-- Cada camada depende apenas das anteriores (seção 4.2), sem dependência circular.
+- Entregue só a implementação pedida. Se faltar informação, pergunte em vez de inventar.
+- Cada implementação depende apenas das anteriores (seção 4.2), sem dependência circular.
 - Nenhum teste usa rede, Ollama ou Gemini: use o adapter falso ou funções HTTP injetadas.
 - Valores marcados como PROVISÓRIO ficam em `config.py`, nunca dentro da lógica.
 - Funções pequenas e puras; I/O só nas bordas (adapters, registro, dados, CLI).
@@ -35,14 +35,14 @@ O roteador decide, para cada pergunta, se responde o modelo barato (local) ou o 
 | --- | --- | --- |
 | Modelo forte | Gemini Flash. O id exato vem da variável de ambiente `GEMINI_MODEL` e a chave de `GEMINI_API_KEY`. DeepSeek fica fora desta versão. | `adapters/gemini.py` |
 | Preço de referência | Preços da API Claude em USD por milhão de tokens (entrada / saída): barato = Haiku 5.5 (0,10 / 0,50); forte = Sonnet 5.5 (2 / 10). Valores publicados em outubro de 2026; conferir na [página de preços](https://platform.claude.com/docs/en/about-claude/pricing) antes de publicar. Servem só para estimar custo, porque os modelos realmente usados são gratuitos. | `config.preco_ref` |
-| Tamanho do dataset | Sem definição. O código não presume quantidade; a divisão por documento avisa quando há menos de 2 documentos. | camada 9 |
-| Registro de requisições | CSV. | camada 5 |
-| Cortes das faixas e valor de X | Definir depois. Provisório: terços das respostas reais, com X igual ao limite superior da faixa média. | `config.py`, camadas 9 e 13 |
+| Tamanho do dataset | Sem definição. O código não presume quantidade; a divisão por documento avisa quando há menos de 2 documentos. | implementação 9 |
+| Registro de requisições | CSV. | implementação 5 |
+| Cortes das faixas e valor de X | Definir depois. Provisório: terços das respostas reais, com X igual ao limite superior da faixa média. | `config.py`, implementações 9 e 13 |
 | Fator do teto e limiar de alerta | Definir depois. Provisório: 1,5 × X e 5%. | `config.py` |
-| Tokenizador | Definir depois. Provisório: caracteres ÷ 4, atrás da interface `Tokenizador`, para trocar sem mexer no resto. | camada 1 |
-| Meta de qualidade do limiar de tokens | Definir depois. Provisório: 95% da qualidade do forte. | camada 14 (opcional) |
-| Par de modelos e meta de qualidade do RouterBench | Definir depois. | camada 15 (opcional) |
-| Parâmetros e motivos de parada de cada provedor | Definir depois. Usar a seção 6 e conferir na documentação de cada provedor. | camada 3 |
+| Tokenizador | Definir depois. Provisório: caracteres ÷ 4, atrás da interface `Tokenizador`, para trocar sem mexer no resto. | implementação 1 |
+| Meta de qualidade do limiar de tokens | Definir depois. Provisório: 95% da qualidade do forte. | implementação 14 (opcional) |
+| Par de modelos e meta de qualidade do RouterBench | Definir depois. | implementação 15 (opcional) |
+| Parâmetros e motivos de parada de cada provedor | Definir depois. Usar a seção 6 e conferir na documentação de cada provedor. | implementação 3 |
 | Nome do projeto | Sem definição. Nome de pacote provisório: `roteador`. | `pyproject.toml` |
 
 ## 4. Arquitetura
@@ -178,21 +178,21 @@ No `dataset.csv`, as notas são `correta`, `parcial` ou `errada`; `contexto_toke
 
 Qualquer ajuste de nome de campo é feito no adapter, nunca na lógica do roteador.
 
-## 7. Camadas de implementação
+## 7. Implementações
 
-As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliação e CLI). As camadas 12 e 13 formam o **plano completo** (v2). As camadas 14 a 16 são opcionais.
+As implementações 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliação e CLI). As implementações 12 e 13 formam o **plano completo** (v2). As implementações 14 a 17 são opcionais.
 
-### Camada 0: esqueleto, tipos e configuração
+### Implementação 0: esqueleto, tipos e configuração
 
 - **Arquivos:** `pyproject.toml`, `tipos.py`, `config.py`, `tests/test_config.py`.
 - **Fazer:** criar o pacote, os tipos da seção 4.4 e a `Config` da seção 4.5. `carregar_config(caminho=None)` lê um JSON opcional que sobrescreve os padrões e falha com mensagem clara se houver chave desconhecida.
 - **Testes:** padrões corretos; o JSON sobrescreve; chave desconhecida falha.
 - **Pronto quando:** `pytest` roda e passa.
 
-### Camada 1: tokenizador real
+### Implementação 1: tokenizador real
 
 
-1. **Escolher uma biblioteca e usar sempre a mesma.** Para o roteador, a consistência importa mais que a exatidão. `tiktoken` com uma codificação fixa em `cfg.tokenizador` (PROVISÓRIO, por exemplo `tiktoken:o200k_base`). A alternativa é a biblioteca `tokenizers` com o arquivo de tokenizador do Llama 3.2, que dá a contagem exata do modelo barato, mas exige baixar o arquivo. Esta camada autoriza a nova dependência.
+1. **Escolher uma biblioteca e usar sempre a mesma.** Para o roteador, a consistência importa mais que a exatidão. `tiktoken` com uma codificação fixa em `cfg.tokenizador` (PROVISÓRIO, por exemplo `tiktoken:o200k_base`). A alternativa é a biblioteca `tokenizers` com o arquivo de tokenizador do Llama 3.2, que dá a contagem exata do modelo barato, mas exige baixar o arquivo. Esta implementação autoriza a nova dependência.
 2. **Medir o erro do aproximado.** Com as 50 perguntas do dataset, compare a contagem do aproximado com a do real e calcule a razão média. Em português, o divisor 4 tende a subestimar os tokens, então ajuste o divisor se a diferença for grande e registre o valor em `config.py`.
 3. **Implementar `TokenizadorReal`.** Carrega a biblioteca só no primeiro uso (carga preguiçosa) e levanta `ErroTokenizador` se a biblioteca não estiver instalada ou o arquivo da codificação não puder ser obtido.
 4. **Ligar na fábrica.** `criar_tokenizador(cfg)` passa a montar `TokenizadorComReserva(TokenizadorReal(...), TokenizadorAproximado())`.
@@ -200,28 +200,28 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 6. **Testes.** `TokenizadorReal` com `pytest.importorskip` (é pulado se a biblioteca não existir); mesmo texto, mesma contagem; texto vazio dá 0; a contagem real fica dentro de uma tolerância esperada em relação ao aproximado; falha simulada na carga aciona a reserva.
 7. **Pronto quando:** o roteador v1 roda com o real, cai para o aproximado se a carga falhar, e o registro mostra qual dos dois foi usado.
 
-### Camada 1.2 Tokenizador substituto
+### Implementação 1.2 Tokenizador substituto
 - **Arquivo:** `tokenizador.py`.
 - **Fazer:** `TokenizadorAproximado`, que devolve `ceil(len(texto) / 4)` e 0 para texto vazio.
 - **Testes:** texto vazio, curto, longo e com acentos; o objeto satisfaz o `Protocol`.
 - **Não fazer:** instalar biblioteca de tokenização (a escolha foi adiada).
 
 
-### Camada 2: contrato de adapter e adapter falso
+### Implementação 2: contrato de adapter e adapter falso
 
 - **Arquivos:** `adapters/base.py`, `adapters/falso.py`.
 - **Fazer:** `AdapterFalso(respostas)` devolve as respostas programadas em sequência e guarda cada chamada recebida (prompt e limite), para os testes inspecionarem.
 - **Testes:** a sequência é respeitada; as chamadas ficam registradas; esgotar a lista levanta erro claro.
 - **Pronto quando:** o orquestrador pode ser testado sem rede.
 
-### Camada 3: adapters Ollama e Gemini
+### Implementação 3: adapters Ollama e Gemini
 
 - **Arquivos:** `adapters/ollama.py`, `adapters/gemini.py`.
 - **Fazer:** cada adapter recebe uma função `post` injetável (padrão `requests.post`), converte a resposta do provedor em `RespostaModelo` (seção 6), normaliza o motivo de parada e mede o tempo. Campo ausente na resposta nunca gera exceção: vira texto vazio e motivo `vazio`. Erro de rede ou HTTP vira `ErroAdapter` com mensagem clara. O Gemini falha com mensagem clara se `GEMINI_API_KEY` ou `GEMINI_MODEL` faltarem.
 - **Testes** (com `post` falso e JSONs de exemplo): resposta normal; parada por limite; resposta do Gemini sem `parts` (o raciocínio consumiu o limite) vira `vazio`; tokens de raciocínio lidos quando existirem; erro HTTP.
 - **Pronto quando:** os testes passam sem rede.
 
-### Camada 4: detector de respostas vazias ou truncadas
+### Implementação 4: detector de respostas vazias ou truncadas
 
 - **Arquivo:** `detector.py`.
 - **Fazer:** `classificar(resposta, limite_tokens, cfg) -> Ocorrencia`, aplicando as regras **nesta ordem**:
@@ -234,19 +234,19 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 - **Testes:** um para cada regra; a ordem das regras; resposta normal; sem limite (`None`), as regras 3 e 5 não se aplicam.
 - **Pronto quando:** todas as regras estão cobertas.
 
-### Camada 5: registro de requisições e arquivo de ML
+### Implementação 5: registro de requisições e arquivo de ML
 
 - **Arquivo:** `registro.py`.
 - **Fazer:** `RegistroCsv(caminho, colunas)` cria o arquivo com cabeçalho se não existir e `adicionar(linha)` grava uma linha e fecha o arquivo a cada escrita (nada se perde se a execução for interrompida). Duas instâncias usam os esquemas da seção 5. Inclua a função de leitura.
 - **Testes** (com `tmp_path`): cabeçalho criado uma vez; várias linhas sem duplicar o cabeçalho; campo faltando ou sobrando gera erro; a leitura devolve o que foi gravado, inclusive com vírgulas, aspas e acentos no texto.
 
-### Camada 6: limite de tokens
+### Implementação 6: limite de tokens
 
 - **Arquivo:** `limite.py`.
 - **Fazer:** `montar_prompt(prompt, x)` acrescenta ao final “Limite seus gastos a cerca de X tokens.”; `teto_rigido(x, cfg)` devolve `ceil(fator_teto × x)`; `limite_por_faixa(faixa, cortes)` devolve X (o corte superior da faixa média) para a faixa média e `None` para as outras.
 - **Testes:** texto exato do prompt; arredondamento do teto; faixas curta e longa sem limite; X ≤ 0 gera erro.
 
-### Camada 7: roteador v1
+### Implementação 7: roteador v1
 
 - **Arquivo:** `roteador_v1.py`.
 - **Fazer:** `RoteadorV1(tokenizador, cfg).decidir(pergunta, contexto)`:
@@ -256,14 +256,14 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 - **Testes:** abaixo, igual e acima do limiar; contexto grande; motivo preenchido; duas perguntas com a mesma contagem de tokens e textos diferentes recebem a mesma decisão.
 - **Não fazer:** lista de palavras-chave.
 
-### Camada 8: orquestrador
+### Implementação 8: orquestrador
 
 - **Arquivo:** `orquestrador.py`.
 - **Fazer:** `Orquestrador(roteador, adapters, tokenizador, registro, registro_ml, cfg).responder(pergunta, contexto='')` segue o fluxo da seção 4.3. A nova tentativa acontece no máximo uma vez, para `VAZIO`, `TRUNCADO` e `LIMITE_CONSUMIDO_PELO_RACIOCINIO`; `POSSIVELMENTE_TRUNCADO` só gera alerta. Custo estimado = tokens × preço de referência do papel, separando entrada e saída. Cada requisição vai ao registro, e cada ocorrência ao arquivo de ML.
 - **Testes** (com adapters falsos): fluxo normal; barato vazio escala ao forte; forte truncado repete com o teto dobrado; segunda tentativa também falha e o resultado volta com a ocorrência, sem terceira tentativa; X aplicado só ao forte (conferir o prompt recebido); custo calculado; linhas gravadas nos dois arquivos.
 - **Pronto quando:** todo o fluxo roda sem rede.
 
-### Camada 9: dados e rótulos
+### Implementação 9: dados e rótulos
 
 - **Arquivos:** `dados/carregador.py`, `dados/rotulos.py`.
 - **Fazer:**
@@ -274,21 +274,21 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
   - `dividir_por_documento(linhas, fracao_teste, semente)` nunca separa linhas do mesmo documento e falha com mensagem clara se houver menos de 2 documentos.
 - **Testes:** todas as combinações de notas; cortes com poucos dados; fronteiras das faixas; truncada sobe uma faixa; divisão sem vazamento entre treino e teste; erro com 1 documento.
 
-### Camada 10: avaliação e curva custo × qualidade
+### Implementação 10: avaliação e curva custo × qualidade
 
 - **Arquivos:** `avaliacao/politicas.py`, `curva.py`, `relatorio.py`.
 - **Fazer:** avaliar offline, sobre o dataset já gravado e sem chamar modelos, estas políticas: `sempre_barato`, `sempre_forte`, `aleatorio(proporcao, semente)`, `perfeito` (barato quando `barato_basta`), `v1` e `forte_limitado` (usa as colunas `nota_forte_limitado` e `tokens_resposta_forte_limitado`; sem elas, é ignorada com aviso). Para cada política: qualidade média (nota ÷ 2), custo estimado e os percentuais em relação ao `sempre_forte`. Gerar `curva.csv` e uma tabela em Markdown no formato “mantive X% da qualidade do forte gastando Y% menos”. O relatório de alertas calcula a taxa de respostas vazias e truncadas por modelo e por faixa (ocorrências do arquivo de ML ÷ requisições do registro) e marca as que passam de `limiar_alerta`.
 - **Testes:** dataset pequeno com resultado calculado à mão; `perfeito` nunca perde em qualidade; `sempre_forte` dá 100% por definição; aleatório reprodutível com a mesma semente; taxa de alertas correta.
 - **Pronto quando:** a curva sai de um dataset de exemplo.
 
-### Camada 11: CLI e README
+### Implementação 11: CLI e README
 
 - **Arquivos:** `cli.py`, `README.md`.
 - **Fazer:** subcomandos `rotear 'pergunta' [--contexto arquivo]`, `coletar --politica {barato,forte,forte_limitado,v1}` (roda o orquestrador sobre as perguntas do dataset e grava respostas, tokens e tempo, com as notas em branco para preenchimento manual) e `avaliar` (curva e relatório de alertas). O README explica instalação, variáveis de ambiente, cada comando, como ler a curva e os limites do projeto.
 - **Testes:** cada subcomando com adapters falsos e `tmp_path`; mensagens de erro para chave ausente e dataset inexistente.
 - **Pronto quando:** o plano mínimo roda de ponta a ponta.
 
-### Camada 12: embedder e classificadores A e B
+### Implementação 12: embedder e classificadores A e B
 
 - **Arquivos:** `ml/embedder.py`, `ml/classificadores.py`.
 - **Fazer:**
@@ -299,13 +299,13 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
   - `salvar` e `carregar` com `joblib`, guardando o nome do embedder e os cortes das faixas.
 - **Testes** (com `EmbedderFalso` e dados sintéticos): o modelo aprende uma regra simples (acurácia acima de 0,9); formato das features; salvar e carregar dão a mesma predição; matriz de confusão com o tamanho certo; carregar um modelo treinado com outro embedder gera erro claro.
 
-### Camada 13: roteador v2
+### Implementação 13: roteador v2
 
 - **Arquivo:** `ml/roteador_v2.py`.
 - **Fazer:** `RoteadorV2(embedder, modelo_a, modelo_b, tokenizador, cfg).decidir(...)`: vai ao barato se a probabilidade de “o barato basta” for ≥ `limiar_probabilidade`; caso contrário, ao forte. A faixa prevista vem do B. No forte, com faixa média, `limite_tokens = limite_por_faixa(...)`. O motivo registra a probabilidade. Adicionar o subcomando `treinar` e a política `v2` na CLI e na curva.
 - **Testes:** modelos falsos com probabilidade conhecida; limiar nas bordas; faixa média no forte gera limite, curta e longa não; o barato nunca recebe limite; satisfaz o `Protocol` `Roteador`.
 
-### Camada 14: treinar `limiar_tokens_pergunta` na curva
+### Implementação 14: treinar `limiar_tokens_pergunta` na curva
 
 - **Objetivo:** achar o valor de `limiar_tokens_pergunta` que dá o melhor equilíbrio custo × qualidade no roteador v1. A calibração usa os dados rotulados próprios e a curva de custo × qualidade. Este limiar não é um limite técnico do modelo. Ele é uma regra de política.
 - **Arquivos:** `ml/limiar.py`, `cli.py`, `tests/ml/test_limiar.py`, `tests/test_cli.py`.
@@ -333,7 +333,7 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
    - Inclua também valores fixos úteis para comparação, por exemplo 100, 200, 300 e 500.
 
 4. **Simular o v1 para cada candidato.**
-   - Para cada `T` candidato, crie uma cópia da `Config` com `limiar_tokens_pergunta=T` com as mesmas regras da camada v1.
+   - Para cada `T` candidato, crie uma cópia da `Config` com `limiar_tokens_pergunta=T` com as mesmas regras do v1.
 
 5. **Calcular as métricas de cada candidato.**
    - Qualidade média: soma das notas dividida por `2 × número de linhas`.
@@ -369,7 +369,7 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 - **Estado:** implementação e testes com dataset sintético prontos. Falta o dataset real rotulado para produzir um limiar válido.
 - **Aviso:** este limiar vale para o v1. O v2 usa `limiar_probabilidade`. O valor depende do tokenizador. Se o tokenizador mudar, calibre o limiar de novo.
 
-### Camada 15: treinar `limiar_probabilidade` com RouterBench
+### Implementação 15: treinar `limiar_probabilidade` com RouterBench
 
 - **Objetivo:** achar o valor de `limiar_probabilidade` que dá o melhor equilíbrio custo × qualidade, usando o [RouterBench](https://arxiv.org/html/2403.12031v1) como dados externos de calibração. A avaliação final continua nos dados próprios.
 - **Arquivos:** `dados/routerbench.py`, `ml/limiar.py`, `cli.py`, `tests/dados/test_routerbench.py`, `tests/ml/test_limiar.py`, `tests/test_cli.py`.
@@ -405,13 +405,7 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
     - Se nenhum limiar atingir a meta, escolha o candidato de melhor qualidade e registre um aviso.
     - Em empate, prefira o limiar mais alto. Isso deixa a decisão mais conservadora.
 
-9. **Validar o limiar nos dados próprios.**
-    - Rode `roteador avaliar --config resultados/config_limiar_probabilidade.json`.
-    - Compare a linha `v2` com `sempre_forte` e com o limiar anterior.
-    - Se a qualidade cair abaixo da meta nos dados próprios, não adote o limiar.
-    - Nesse caso, use o RouterBench apenas como pré-calibração.
-
-10. **Adicionar o subcomando `treinar-limiar-probabilidade`.**
+9. **Adicionar o subcomando `treinar-limiar-probabilidade`.**
     - Interface sugerida:
 
       ```bash
@@ -425,8 +419,9 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 
 
 - **Pronto quando:** o comando gera um `config_limiar_probabilidade.json` reproduzível, com o limiar escolhido e as métricas. O comando `roteador avaliar --config` aceita o arquivo. A curva mostra a política `v2` com o novo limiar.
+- **Limite:** esta implementação produz uma pré-calibração. A confirmação com dados próprios é a Implementação 17.
 
-### Camada 16: servidor HTTP local compatível com OpenAI
+### Implementação 16: servidor HTTP local compatível com OpenAI
 
 - **Objetivo:** expor o roteador como uma API local para clientes compatíveis com OpenAI.
 - **Arquivos:** `servidor.py`, `tests/test_servidor.py`.
@@ -441,26 +436,50 @@ As camadas 0 a 11 formam o **plano mínimo** (roteador v1 completo, com avaliaç
 - **Pronto quando:** um cliente compatível com OpenAI aponta para o servidor local e recebe a resposta roteada.
 - **Limite inicial:** sem streaming e sem function calling.
 
+### Implementação 17: validar o limiar nos dados próprios
+
+- **Objetivo:** confirmar, com dados reais anotados, se o `limiar_probabilidade` pré-calibrado com o RouterBench mantém a qualidade e a economia nos dados de produção. O RouterBench serve para pré-calibrar; ele não substitui esta etapa.
+- **Depende de:** Implementação 9 (dados e rótulos) e Implementação 15 (pré-calibração com RouterBench).
+- **Arquivos:** `dados/dataset.csv`, `cli.py`, `avaliacao/`.
+- **Fazer:**
+  1. Reunir o dataset real rotulado com os mesmos campos da Implementação 9. O tamanho mínimo é o mesmo da Implementação 14: 150 a 300 perguntas; o recomendado é 300 a 500 em 30 a 50 documentos, com validação e teste separados por documento.
+  2. Rodar o v2 com o limiar pré-calibrado nos dados próprios, sem misturar com o RouterBench:
+     ```bash
+     roteador avaliar --config resultados/config_limiar_probabilidade.json
+     ```
+  3. Comparar a linha `v2` com `sempre_forte` e com o limiar anterior. Conferir `qualidade_relativa_pct`, `custo_relativo_pct` e `economia_pct`.
+  4. Manter a meta usada no RouterBench, por exemplo 95% da qualidade do forte. Exigir também economia positiva.
+  5. Se a qualidade ficar abaixo da meta ou a economia não aparecer, não adotar o JSON. Usar o RouterBench apenas como pré-calibração, ajustar o limiar ou coletar mais dados e repetir.
+  6. Registrar o resultado da validação, com data, tamanho do dataset, limiar, qualidade e economia, junto da configuração adotada.
+- **Testes:** com dataset sintético, cobrir aprovação, reprovação e ausência de economia, sem rede.
+- **Pronto quando:** o dataset real rotulado confirma a meta e a configuração é adotada; ou a reprovação fica registrada e o limiar não é adotado.
+- **Estado:** bloqueada. O código e os testes podem usar dados sintéticos, mas não existe `dados/dataset.csv` real no repositório.
+
 ## 8. Estado atual
 
-- [x] Camada 0: esqueleto, tipos e configuração
-- [x] Camada 1: tokenizador
-- [x] Camada 2: contrato de adapter e adapter falso
-- [x] Camada 3: adapters Ollama e Gemini
-- [x] Camada 4: detector
-- [x] Camada 5: registro e arquivo de ML
-- [x] Camada 6: limite de tokens
-- [x] Camada 7: roteador v1
-- [x] Camada 8: orquestrador
-- [x] Camada 9: dados e rótulos
-- [x] Camada 10: avaliação e curva
-- [x] Camada 11: CLI e README
-- [x] Camada 12: embedder e classificadores
-- [x] Camada 13: roteador v2
-- [ ] Camada 14: treinar `limiar_tokens_pergunta` v1 na curva
+- [x] Implementação 0: esqueleto, tipos e configuração
+- [x] Implementação 1: tokenizador
+- [x] Implementação 2: contrato de adapter e adapter falso
+- [x] Implementação 3: adapters Ollama e Gemini
+- [x] Implementação 4: detector
+- [x] Implementação 5: registro e arquivo de ML
+- [x] Implementação 6: limite de tokens
+- [x] Implementação 7: roteador v1
+- [x] Implementação 8: orquestrador
+- [x] Implementação 9: dados e rótulos
+- [x] Implementação 10: avaliação e curva
+- [x] Implementação 11: CLI e README
+- [x] Implementação 12: embedder e classificadores
+- [x] Implementação 13: roteador v2
+- [ ] Implementação 14: treinar `limiar_tokens_pergunta` v1 na curva
   - [x] Implementação e dataset sintético de testes
   - [ ] Calibração com o dataset real rotulado
-- [ ] Camada 15: treinar `limiar_probabilidade` v2 com RouterBench
-- [ ] Camada 16: servidor HTTP local compatível com OpenAI
+- [x] Implementação 15: treinar `limiar_probabilidade` v2 com RouterBench
+  - [x] Implementação, CLI e testes com o RouterBench
+  - [x] Calibração com o RouterBench, embedder real e recorte versionado
+- [ ] Implementação 16: servidor HTTP local compatível com OpenAI
+- [ ] Implementação 17: validar o limiar nos dados próprios
+  - [ ] Dataset local rotulado (`dados/dataset.csv`)
+  - [ ] Rodar `roteador avaliar --config` e confirmar a meta batida com perguntas do usuário
 
 

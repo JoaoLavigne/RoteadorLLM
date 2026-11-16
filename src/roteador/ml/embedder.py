@@ -54,9 +54,13 @@ class EmbedderOllama:
         modelo: str = "nomic-embed-text",
         host: str | None = None,
         post: Callable[..., Any] | None = None,
+        lote: int = 64,
     ) -> None:
+        if lote <= 0:
+            raise ValueError("O tamanho do lote deve ser maior que zero.")
         self.modelo = modelo
         self.nome = modelo
+        self.lote = lote
         self.host = (
             host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         ).rstrip("/")
@@ -67,7 +71,14 @@ class EmbedderOllama:
         if not lista:
             return np.empty((0, 0), dtype=float)
 
-        payload = {"model": self.modelo, "input": lista}
+        partes = [
+            self._embutir_lote(lista[inicio : inicio + self.lote])
+            for inicio in range(0, len(lista), self.lote)
+        ]
+        return np.concatenate(partes, axis=0)
+
+    def _embutir_lote(self, lista: Sequence[str]) -> np.ndarray:
+        payload = {"model": self.modelo, "input": list(lista)}
         try:
             resposta_http = self._post_fn()(
                 f"{self.host}/api/embed", json=payload

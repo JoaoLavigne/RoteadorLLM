@@ -53,6 +53,33 @@ def test_barato_basta_aceita_dicionario_com_notas_em_texto():
     assert barato_basta(linha) is True
 
 
+def test_barato_basta_usa_o_score_bruto_quando_presente():
+    pior = _linha(
+        nota_barato=Nota.PARCIAL,
+        nota_forte=Nota.PARCIAL,
+        score_barato=0.5,
+        score_forte=0.75,
+    )
+    melhor = _linha(
+        nota_barato=Nota.PARCIAL,
+        nota_forte=Nota.PARCIAL,
+        score_barato=0.75,
+        score_forte=0.5,
+    )
+
+    assert barato_basta(pior) is False
+    assert barato_basta(melhor) is True
+
+
+def test_barato_basta_aceita_score_em_dicionario():
+    assert (
+        barato_basta(
+            {"nota_barato": 2, "nota_forte": 2, "score_barato": 0.4, "score_forte": 0.6}
+        )
+        is False
+    )
+
+
 def test_calcular_cortes_com_dois_valores():
     assert calcular_cortes([10, 20], (0.25, 0.75)) == pytest.approx((12.5, 17.5))
 

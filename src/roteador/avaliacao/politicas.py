@@ -22,6 +22,7 @@ class Escolha:
     papel: Papel
     nota: Nota
     tokens_resposta: int
+    qualidade: float | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def escolha_barato(linha: LinhaDataset) -> Escolha:
         papel=Papel.BARATO,
         nota=linha.nota_barato,
         tokens_resposta=linha.tokens_resposta_barato,
+        qualidade=linha.score_barato,
     )
 
 
@@ -58,6 +60,7 @@ def escolha_forte(linha: LinhaDataset) -> Escolha:
         papel=Papel.FORTE,
         nota=linha.nota_forte,
         tokens_resposta=linha.tokens_resposta_forte,
+        qualidade=linha.score_forte,
     )
 
 
@@ -195,6 +198,18 @@ def avaliar_politicas(
     return resultados
 
 
+def medir_escolhas(
+    nome: str,
+    linhas: Sequence[LinhaDataset],
+    escolhas: Sequence[Escolha],
+    cfg: Config,
+    tokenizador: Tokenizador,
+    referencia: ResultadoPolitica | None = None,
+) -> ResultadoPolitica:
+    """Mede qualidade e custo de uma lista de escolhas já feita."""
+    return _medir(nome, linhas, escolhas, cfg, tokenizador, referencia)
+
+
 def _medir(
     nome: str,
     linhas: Sequence[LinhaDataset],
@@ -203,9 +218,14 @@ def _medir(
     tokenizador: Tokenizador,
     referencia: ResultadoPolitica | None,
 ) -> ResultadoPolitica:
-    qualidade_media = sum(int(escolha.nota) for escolha in escolhas) / (
-        2 * len(linhas)
-    )
+    if all(escolha.qualidade is None for escolha in escolhas):
+        qualidade_media = sum(int(escolha.nota) for escolha in escolhas) / (
+            2 * len(linhas)
+        )
+    else:
+        qualidade_media = sum(
+            _qualidade(escolha) for escolha in escolhas
+        ) / len(linhas)
     custo_total = sum(
         _custo(escolha, _tokens_entrada(linha, tokenizador), cfg)
         for linha, escolha in zip(linhas, escolhas)
@@ -271,6 +291,12 @@ def _escolha_v1(
     if tokens_pergunta > cfg.limiar_tokens_pergunta:
         return escolha_forte(linha)
     return escolha_barato(linha)
+
+
+def _qualidade(escolha: Escolha) -> float:
+    if escolha.qualidade is not None:
+        return float(escolha.qualidade)
+    return int(escolha.nota) / 2
 
 
 def _percentual(valor: float, base: float) -> float:
